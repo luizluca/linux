@@ -46,6 +46,8 @@
 #define REALTEK_SMI_HW_STOP_DELAY		25	/* msecs */
 #define REALTEK_SMI_HW_START_DELAY		100	/* msecs */
 
+#ifdef REALTEK_I2C_OPERATION
+
 static inline void realtek_smi_clk_delay(struct realtek_smi *smi)
 {
 	ndelay(smi->clk_delay);
@@ -199,7 +201,7 @@ static int realtek_smi_read_byte1(struct realtek_smi *smi, u8 *data)
 	return 0;
 }
 
-static int realtek_smi_read_reg(struct realtek_smi *smi, u32 addr, u32 *data)
+static int realtek_smi_smi_read_reg(struct realtek_smi *smi, u32 addr, u32 *data)
 {
 	unsigned long flags;
 	u8 lo = 0;
@@ -241,7 +243,7 @@ static int realtek_smi_read_reg(struct realtek_smi *smi, u32 addr, u32 *data)
 	return ret;
 }
 
-static int realtek_smi_write_reg(struct realtek_smi *smi,
+static int realtek_smi_smi_write_reg(struct realtek_smi *smi,
 				 u32 addr, u32 data, bool ack)
 {
 	unsigned long flags;
@@ -288,42 +290,31 @@ static int realtek_smi_write_reg(struct realtek_smi *smi,
 	return ret;
 }
 
-/* There is one single case when we need to use this accessor and that
- * is when issueing soft reset. Since the device reset as soon as we write
- * that bit, no ACK will come back for natural reasons.
- */
-int realtek_smi_write_reg_noack(struct realtek_smi *smi, u32 addr,
-				u32 data)
-{
-	return realtek_smi_write_reg(smi, addr, data, false);
-}
-EXPORT_SYMBOL_GPL(realtek_smi_write_reg_noack);
-
 /* Regmap accessors */
 
-static int realtek_smi_write(void *ctx, u32 reg, u32 val)
+static int realtek_smi_smi_write(void *ctx, u32 reg, u32 val)
 {
 	struct realtek_smi *smi = ctx;
 
-	return realtek_smi_write_reg(smi, reg, val, true);
+	return realtek_smi_smi_write_reg(smi, reg, val, true);
 }
 
-static int realtek_smi_read(void *ctx, u32 reg, u32 *val)
+static int realtek_smi_smi_read(void *ctx, u32 reg, u32 *val)
 {
 	struct realtek_smi *smi = ctx;
 
-	return realtek_smi_read_reg(smi, reg, val);
+	return realtek_smi_smi_read_reg(smi, reg, val);
 }
 
-static const struct regmap_config realtek_smi_mdio_regmap_config = {
+static const struct regmap_config realtek_smi_smi_regmap_config = {
 	.reg_bits = 10, /* A4..A0 R4..R0 */
 	.val_bits = 16,
 	.reg_stride = 1,
 	/* PHY regs are at 0x8000 */
 	.max_register = 0xffff,
 	.reg_format_endian = REGMAP_ENDIAN_BIG,
-	.reg_read = realtek_smi_read,
-	.reg_write = realtek_smi_write,
+	.reg_read = realtek_smi_smi_read,
+	.reg_write = realtek_smi_smi_write,
 	.cache_type = REGCACHE_NONE,
 };
 
@@ -341,6 +332,208 @@ static int realtek_smi_mdio_write(struct mii_bus *bus, int addr, int regnum,
 
 	return smi->ops->phy_write(smi, addr, regnum, val);
 }
+
+static int realtek_smi_probe_smi(struct platform_device *pdev, struct realtek_smi *smi)
+{
+	const struct realtek_smi_variant *var;
+	struct device *dev = &pdev->dev;
+	int ret;
+
+	var = of_device_get_match_data(dev);
+	smi->map = devm_regmap_init(dev, NULL, smi,
+				    &realtek_smi_smi_regmap_config);
+	if (IS_ERR(smi->map)) {
+		ret = PTR_ERR(smi->map);
+		dev_err(dev, "regmap init failed: %d\n", ret);
+		return ret;
+	}
+
+	smi->clk_delay = var->clk_delay;
+
+	/* Fetch MDIO pins */
+	smi->mdc = devm_gpiod_get_optional(dev, "mdc", GPIOD_OUT_LOW);
+	if (IS_ERR(smi->mdc))
+		return PTR_ERR(smi->mdc);
+	smi->mdio = devm_gpiod_get_optional(dev, "mdio", GPIOD_OUT_LOW);
+	if (IS_ERR(smi->mdio))
+		return PTR_ERR(smi->mdio);
+
+	return 0;
+}
+
+#endif /* REALTEK_I2C_OPERATION */
+
+#ifdef REALTEK_MDC_MDIO_OPERATION
+
+/* Read/write via mdiobus */
+#define MDC_MDIO_CTRL0_REG              31
+#define MDC_MDIO_START_REG              29
+#define MDC_MDIO_CTRL1_REG              21
+#define MDC_MDIO_ADDRESS_REG            23
+#define MDC_MDIO_DATA_WRITE_REG         24
+#define MDC_MDIO_DATA_READ_REG          25
+
+#define MDC_MDIO_START_OP               0xFFFF
+#define MDC_MDIO_ADDR_OP                0x000E
+#define MDC_MDIO_READ_OP                0x0001
+#define MDC_MDIO_WRITE_OP               0x0003
+#define MDC_REALTEK_DEFAULT_PHY_ADDR    0x0
+
+int realtek_smi_mdc_mdio_read_reg(struct realtek_smi *smi, u32 addr, u32 *data)
+{
+        u32 phy_id = smi->phy_id;
+        struct mii_bus *mbus = smi->ext_mbus;
+
+        BUG_ON(in_interrupt());
+
+        mutex_lock(&mbus->mdio_lock);
+        /* Write Start command to register 29 */
+        mbus->write(mbus, phy_id, MDC_MDIO_START_REG, MDC_MDIO_START_OP);
+
+        /* Write address control code to register 31 */
+        mbus->write(mbus, phy_id, MDC_MDIO_CTRL0_REG, MDC_MDIO_ADDR_OP);
+
+        /* Write Start command to register 29 */
+        mbus->write(mbus, phy_id, MDC_MDIO_START_REG, MDC_MDIO_START_OP);
+
+        /* Write address to register 23 */
+        mbus->write(mbus, phy_id, MDC_MDIO_ADDRESS_REG, addr);
+
+        /* Write Start command to register 29 */
+        mbus->write(mbus, phy_id, MDC_MDIO_START_REG, MDC_MDIO_START_OP);
+
+        /* Write read control code to register 21 */
+        mbus->write(mbus, phy_id, MDC_MDIO_CTRL1_REG, MDC_MDIO_READ_OP);
+
+        /* Write Start command to register 29 */
+        mbus->write(mbus, phy_id, MDC_MDIO_START_REG, MDC_MDIO_START_OP);
+
+        /* Read data from register 25 */
+        *data = mbus->read(mbus, phy_id, MDC_MDIO_DATA_READ_REG);
+
+        mutex_unlock(&mbus->mdio_lock);
+
+        return 0;
+}
+
+static int realtek_smi_mdc_mdio_write_reg(struct realtek_smi *smi, u32 addr, u32 data)
+{
+        u32 phy_id = smi->phy_id;
+        struct mii_bus *mbus = smi->ext_mbus;
+
+        BUG_ON(in_interrupt());
+
+        mutex_lock(&mbus->mdio_lock);
+
+        /* Write Start command to register 29 */
+        mbus->write(mbus, phy_id, MDC_MDIO_START_REG, MDC_MDIO_START_OP);
+
+        /* Write address control code to register 31 */
+        mbus->write(mbus, phy_id, MDC_MDIO_CTRL0_REG, MDC_MDIO_ADDR_OP);
+
+        /* Write Start command to register 29 */
+        mbus->write(mbus, phy_id, MDC_MDIO_START_REG, MDC_MDIO_START_OP);
+
+        /* Write address to register 23 */
+        mbus->write(mbus, phy_id, MDC_MDIO_ADDRESS_REG, addr);
+
+        /* Write Start command to register 29 */
+        mbus->write(mbus, phy_id, MDC_MDIO_START_REG, MDC_MDIO_START_OP);
+
+        /* Write data to register 24 */
+        mbus->write(mbus, phy_id, MDC_MDIO_DATA_WRITE_REG, data);
+
+        /* Write Start command to register 29 */
+        mbus->write(mbus, phy_id, MDC_MDIO_START_REG, MDC_MDIO_START_OP);
+
+        /* Write data control code to register 21 */
+        mbus->write(mbus, phy_id, MDC_MDIO_CTRL1_REG, MDC_MDIO_WRITE_OP);
+
+        mutex_unlock(&mbus->mdio_lock);
+        return 0;
+}
+static int realtek_smi_mdc_mdio_write(void *ctx, u32 reg, u32 val)
+{
+	struct realtek_smi *smi = ctx;
+
+	return realtek_smi_mdc_mdio_write_reg(smi, reg, val);
+}
+
+static int realtek_smi_mdc_mdio_read(void *ctx, u32 reg, u32 *val)
+{
+	struct realtek_smi *smi = ctx;
+
+	return realtek_smi_mdc_mdio_read_reg(smi, reg, val);
+}
+
+static const struct regmap_config realtek_smi_mdio_regmap_config = {
+	.reg_bits = 10, /* A4..A0 R4..R0 */
+	.val_bits = 16,
+	.reg_stride = 1,
+	/* PHY regs are at 0x8000 */
+	.max_register = 0xffff,
+	.reg_format_endian = REGMAP_ENDIAN_BIG,
+	.reg_read = realtek_smi_mdc_mdio_read,
+	.reg_write = realtek_smi_mdc_mdio_write,
+	.cache_type = REGCACHE_NONE,
+};
+
+static int realtek_smi_probe_mdc_mdio(struct platform_device *pdev, struct realtek_smi *smi)
+{
+	struct device *dev = &pdev->dev;
+	struct device_node *np;
+	struct device_node *mdio_node;
+	int ret;
+
+	np = dev->of_node;
+
+	mdio_node = of_parse_phandle(np, "mii-bus", 0);
+        if (!mdio_node) {
+		dev_err(dev, "cannot find mdio node phandle");
+		return -ENODEV;
+	}
+
+        smi->ext_mbus = of_mdio_find_bus(mdio_node);
+        if (!smi->ext_mbus) {
+                dev_info(&pdev->dev, "cannot find mdio bus from bus handle (yet)");
+		return -ENODEV;
+        }
+
+        if (of_property_read_u32(np, "phy-id", &smi->phy_id)) {
+                smi->phy_id = MDC_REALTEK_DEFAULT_PHY_ADDR;
+	}
+
+	smi->map = devm_regmap_init(dev, NULL, smi,
+				    &realtek_smi_mdio_regmap_config);
+	if (IS_ERR(smi->map)) {
+		ret = PTR_ERR(smi->map);
+		dev_err(dev, "regmap init failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+#endif /* defined(REALTEK_MDC_MDIO_OPERATION) */
+
+/* There is one single case when we need to use this accessor and that
+ * is when issueing soft reset. Since the device reset as soon as we write
+ * that bit, no ACK will come back for natural reasons.
+ */
+int realtek_smi_write_reg_noack(struct realtek_smi *smi, u32 addr,
+				u32 data)
+{
+#ifdef REALTEK_MDC_MDIO_OPERATION
+	if (smi->ext_mbus)
+		return realtek_smi_mdc_mdio_write_reg(smi, addr, data);
+#endif
+#ifdef REALTEK_I2C_OPERATION
+	return realtek_smi_smi_write_reg(smi, addr, data, false);
+#else
+	return -ENODEV;
+#endif
+}
+EXPORT_SYMBOL_GPL(realtek_smi_write_reg_noack);
 
 int realtek_smi_setup_mdio(struct realtek_smi *smi)
 {
@@ -389,7 +582,7 @@ static int realtek_smi_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct realtek_smi *smi;
 	struct device_node *np;
-	int ret;
+	int ret = -EINVAL;
 
 	var = of_device_get_match_data(dev);
 	np = dev->of_node;
@@ -398,22 +591,26 @@ static int realtek_smi_probe(struct platform_device *pdev)
 	if (!smi)
 		return -ENOMEM;
 	smi->chip_data = (void *)smi + sizeof(*smi);
-	smi->map = devm_regmap_init(dev, NULL, smi,
-				    &realtek_smi_mdio_regmap_config);
-	if (IS_ERR(smi->map)) {
-		ret = PTR_ERR(smi->map);
-		dev_err(dev, "regmap init failed: %d\n", ret);
+
+#ifdef REALTEK_MDC_MDIO_OPERATION
+	if (!(ret=realtek_smi_probe_mdc_mdio(pdev, smi))) {
+		dev_info(&pdev->dev, "using MDIO mdio bus '%s'\n", smi->ext_mbus->name);
+	} else
+#endif
+#ifdef REALTEK_I2C_OPERATION
+	if (!(ret=realtek_smi_probe_smi(pdev, smi))) {
+		dev_info(&pdev->dev, "using GPIO pins %u (SDA/mdio) and %u (SCK/mdc)\n",
+			 desc_to_gpio(smi->mdio), desc_to_gpio(smi->mdc));
+	} else
+#endif
 		return ret;
-	}
 
 	/* Link forward and backward */
 	smi->dev = dev;
-	smi->clk_delay = var->clk_delay;
 	smi->cmd_read = var->cmd_read;
 	smi->cmd_write = var->cmd_write;
-	smi->ops = var->ops;
-
 	dev_set_drvdata(dev, smi);
+
 	spin_lock_init(&smi->lock);
 
 	/* TODO: if power is software controlled, set up any regulators here */
@@ -424,21 +621,15 @@ static int realtek_smi_probe(struct platform_device *pdev)
 		dev_err(dev, "failed to get RESET GPIO\n");
 		return PTR_ERR(smi->reset);
 	}
+
 	msleep(REALTEK_SMI_HW_STOP_DELAY);
 	gpiod_set_value(smi->reset, 0);
 	msleep(REALTEK_SMI_HW_START_DELAY);
 	dev_info(dev, "deasserted RESET\n");
 
-	/* Fetch MDIO pins */
-	smi->mdc = devm_gpiod_get_optional(dev, "mdc", GPIOD_OUT_LOW);
-	if (IS_ERR(smi->mdc))
-		return PTR_ERR(smi->mdc);
-	smi->mdio = devm_gpiod_get_optional(dev, "mdio", GPIOD_OUT_LOW);
-	if (IS_ERR(smi->mdio))
-		return PTR_ERR(smi->mdio);
-
 	smi->leds_disabled = of_property_read_bool(np, "realtek,disable-leds");
 
+	smi->ops = var->ops;
 	ret = smi->ops->detect(smi);
 	if (ret) {
 		dev_err(dev, "unable to detect switch\n");
@@ -459,6 +650,7 @@ static int realtek_smi_probe(struct platform_device *pdev)
 		dev_err(dev, "unable to register switch ret = %d\n", ret);
 		return ret;
 	}
+
 	return 0;
 }
 
@@ -520,4 +712,10 @@ static struct platform_driver realtek_smi_driver = {
 };
 module_platform_driver(realtek_smi_driver);
 
+#ifdef REALTEK_MDC_MDIO_OPERATION
+//FIXME: We need something to make mdio be loaded before this driver!
+//       or else module will crash if mii-mdio is not initialized
+//       error: cannot find mdio bus from bus handle (yet)
+// MODULE_SOFTDEP("pre: dsa_loop_bdinfo");
+#endif
 MODULE_LICENSE("GPL");

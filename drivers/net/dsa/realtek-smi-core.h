@@ -13,6 +13,10 @@
 #include <linux/gpio/consumer.h>
 #include <net/dsa.h>
 
+// FIXME: expose to kconfig
+#define REALTEK_I2C_OPERATION
+#define REALTEK_MDC_MDIO_OPERATION
+
 struct realtek_smi_ops;
 struct dentry;
 struct inode;
@@ -50,6 +54,10 @@ struct realtek_smi {
 	struct gpio_desc	*mdio;
 	struct regmap		*map;
 	struct mii_bus		*slave_mii_bus;
+#ifdef REALTEK_MDC_MDIO_OPERATION
+	struct mii_bus		*ext_mbus;
+	int                     phy_id;
+#endif
 
 	unsigned int		clk_delay;
 	u8			cmd_read;
