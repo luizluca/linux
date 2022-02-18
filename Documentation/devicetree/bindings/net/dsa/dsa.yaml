@@ -32,6 +32,12 @@ properties:
       (single device hanging off a CPU port) must not specify this property
     $ref: /schemas/types.yaml#/definitions/uint32-array
 
+  mdio:
+    unevaluatedProperties: false
+    description:
+      Container of PHY and devices on the switches MDIO bus.
+    $ref: /schemas/net/mdio.yaml#
+
 patternProperties:
   "^(ethernet-)?ports$":
     type: object
