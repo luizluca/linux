@@ -284,6 +284,13 @@
 		(RTL8365MB_PORT_ISOLATION_REG_BASE + (_physport))
 #define   RTL8365MB_PORT_ISOLATION_MASK			0x07FF
 
+/* Extended filter ID registers - used to key forwarding database with IVL */
+#define RTL8365MB_PORT_EFID_REG_BASE		0x0A32
+#define RTL8365MB_PORT_EFID_REG(_p) \
+		(RTL8365MB_PORT_EFID_REG_BASE + ((_p) >> 2))
+#define   RTL8365MB_PORT_EFID_OFFSET(_p)	(((_p) & 0x3) << 2)
+#define   RTL8365MB_PORT_EFID_MASK(_p) (0x7 << RTL8365MB_PORT_EFID_OFFSET(_p))
+
 /* MSTP port state registers - indexed by tree instance */
 #define RTL8365MB_MSTI_CTRL_BASE			0x0A00
 #define RTL8365MB_MSTI_CTRL_REG(_msti, _physport) \
@@ -1208,10 +1215,117 @@ static int rtl8365mb_port_set_learning(struct realtek_priv *priv, int port,
 			    enable ? RTL8365MB_LEARN_LIMIT_MAX : 0);
 }
 
+static int rtl8365mb_port_set_efid(struct realtek_priv *priv, int port,
+				   u32 efid)
+{
+	return regmap_update_bits(priv->map, RTL8365MB_PORT_EFID_REG(port),
+				  RTL8365MB_PORT_EFID_MASK(port),
+				  efid << RTL8365MB_PORT_EFID_OFFSET(port));
+}
+
+/* Port isolation manipulation functions.
+ *
+ * The port isolation register controls the forwarding mask of a given
+ * port. The switch will not forward packets ingressed on a given port
+ * to ports which are not enabled in its forwarding mask.
+ *
+ * The port forwarding mask has the highest priority in forwarding
+ * decisions. The only exception to this rule is when the switch
+ * receives a packet on its CPU port with ALLOW=0. In that case the TX
+ * field of the CPU tag will override the forwarding port mask.
+ */
 static int rtl8365mb_port_set_isolation(struct realtek_priv *priv, int port,
 					u32 mask)
 {
-	return regmap_write(priv->map, RTL8365MB_PORT_ISOLATION_REG(port), mask);
+	return regmap_write(priv->map, RTL8365MB_PORT_ISOLATION_REG(port),
+			    mask);
+}
+
+static int rtl8365mb_port_add_isolation(struct realtek_priv *priv, int port,
+					u32 mask)
+{
+	return regmap_update_bits(priv->map, RTL8365MB_PORT_ISOLATION_REG(port),
+				  mask, mask);
+}
+
+static int rtl8365mb_port_remove_isolation(struct realtek_priv *priv, int port,
+					   u32 mask)
+{
+	return regmap_update_bits(priv->map, RTL8365MB_PORT_ISOLATION_REG(port),
+				  mask, 0);
+}
+
+static int rtl8365mb_port_bridge_join(struct dsa_switch *ds, int port,
+				      struct dsa_bridge bridge,
+				      bool *tx_forward_offload,
+				      struct netlink_ext_ack *extack)
+{
+	struct realtek_priv *priv = ds->priv;
+	u32 mask;
+	int ret;
+	int i;
+
+	/* Add this port to the isolation group of every other port
+	 * offloading this bridge.
+	 */
+	for (i = 0; i < priv->num_ports; i++) {
+		/* Handle this port after */
+		if (i == port)
+			continue;
+
+		/* Skip ports that are not in this bridge */
+		if (!dsa_port_offloads_bridge(dsa_to_port(ds, i), &bridge))
+			continue;
+
+		ret = rtl8365mb_port_add_isolation(priv, i, BIT(port));
+		if (ret)
+			return ret;
+
+		mask |= BIT(i);
+	}
+
+	/* Add those ports to the isolation group of this port */
+	ret = rtl8365mb_port_add_isolation(priv, port, mask);
+	if (ret)
+		return ret;
+
+	/* Use the bridge number as the EFID for this port */
+	ret = rtl8365mb_port_set_efid(priv, port, bridge.num);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static void rtl8365mb_port_bridge_leave(struct dsa_switch *ds, int port,
+					struct dsa_bridge bridge)
+{
+	struct realtek_priv *priv = ds->priv;
+	u32 mask;
+	int i;
+
+	/* Remove this port from the isolation group of every other
+	 * port offloading this bridge.
+	 */
+	for (i = 0; i < priv->num_ports; i++) {
+		/* Handle this port after */
+		if (i == port)
+			continue;
+
+		/* Skip ports that are not in this bridge */
+		if (!dsa_port_offloads_bridge(dsa_to_port(ds, i), &bridge))
+			continue;
+
+		rtl8365mb_port_remove_isolation(priv, i, BIT(port));
+
+		mask |= BIT(i);
+	}
+
+	/* Remove those ports from the isolation group of this port */
+	rtl8365mb_port_remove_isolation(priv, port, mask);
+
+	/* Revert to the default EFID 0 for standalone mode */
+	rtl8365mb_port_set_efid(priv, port, 0);
 }
 
 static int rtl8365mb_mib_counter_read(struct realtek_priv *priv, int port,
@@ -2124,6 +2238,8 @@ static const struct dsa_switch_ops rtl8365mb_switch_ops = {
 	.setup = rtl8365mb_setup,
 	.teardown = rtl8365mb_teardown,
 	.phylink_get_caps = rtl8365mb_phylink_get_caps,
+	.port_bridge_join = rtl8365mb_port_bridge_join,
+	.port_bridge_leave = rtl8365mb_port_bridge_leave,
 	.port_stp_state_set = rtl8365mb_port_stp_state_set,
 	.get_strings = rtl8365mb_get_strings,
 	.get_ethtool_stats = rtl8365mb_get_ethtool_stats,
