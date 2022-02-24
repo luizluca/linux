@@ -104,6 +104,7 @@
 #include "realtek-smi.h"
 #include "realtek-mdio.h"
 #include "rtl83xx.h"
+#include "rtl8365mb_vlan.h"
 
 /* Family-specific data and limits */
 #define RTL8365MB_PHYADDRMAX		7
@@ -310,6 +311,21 @@
 /* Broadcast flooding port mask */
 #define RTL8365MB_UNKNOWN_BROADCAST_FLOODING_PMASK_REG		0x0892
 #define   RTL8365MB_UNKNOWN_BROADCAST_FLOODING_PMASK_MASK	0x07FF
+
+/* Port-based VID registers 0~5 - each one holds an MC index for two ports */
+#define RTL8365MB_VLAN_PVID_CTRL_BASE			0x0700
+#define RTL8365MB_VLAN_PVID_CTRL_REG(_p) \
+		(RTL8365MB_VLAN_PVID_CTRL_BASE + ((_p) >> 1))
+#define   RTL8365MB_VLAN_PVID_CTRL_PORT0_MCIDX_MASK	0x001F
+#define   RTL8365MB_VLAN_PVID_CTRL_PORT1_MCIDX_MASK	0x1F00
+#define   RTL8365MB_VLAN_PVID_CTRL_PORT_MCIDX_OFFSET(_p) \
+		(((_p) & 1) << 3)
+#define   RTL8365MB_VLAN_PVID_CTRL_PORT_MCIDX_MASK(_p) \
+		(0x1F << RTL8365MB_VLAN_PVID_CTRL_PORT_MCIDX_OFFSET(_p))
+
+/* VLAN control register */
+#define RTL8365MB_VLAN_CTRL_REG			0x07A8
+#define   RTL8365MB_VLAN_CTRL_EN_MASK		0x0001
 
 /* MIB counter value registers */
 #define RTL8365MB_MIB_COUNTER_BASE	0x1000
@@ -633,6 +649,7 @@ struct rtl8365mb_cpu {
  * struct rtl8365mb_port - private per-port data
  * @priv: pointer to parent realtek_priv data
  * @index: DSA port index, same as dsa_port::index
+ * @pvid: port-based VLAN ID, or 0 if unset
  * @stats: link statistics populated by rtl8365mb_stats_poll, ready for atomic
  *         access via rtl8365mb_get_stats64
  * @stats_lock: protect the stats structure during read/update
@@ -641,6 +658,7 @@ struct rtl8365mb_cpu {
 struct rtl8365mb_port {
 	struct realtek_priv *priv;
 	unsigned int index;
+	u16 pvid;
 	struct rtnl_link_stats64 stats;
 	spinlock_t stats_lock;
 	struct delayed_work mib_work;
@@ -652,6 +670,10 @@ struct rtl8365mb_port {
  * @irq: registered IRQ or zero
  * @chip_info: chip-specific info about the attached switch
  * @cpu: CPU tagging and CPU port configuration for this chip
+ * @vlanmc_db: VLAN membership configuration database
+ * @vlanmc_null: reserved VLAN membership config entry for disabling PVID
+ * @vlanmc_synced: VLAN membership configs that should be synced with
+ *                 the VLAN4k table
  * @mib_lock: prevent concurrent reads of MIB counters
  * @ports: per-port data
  *
@@ -662,6 +684,9 @@ struct rtl8365mb {
 	int irq;
 	const struct rtl8365mb_chip_info *chip_info;
 	struct rtl8365mb_cpu cpu;
+	struct rtl8365mb_vlanmc_db vlanmc_db;
+	struct rtl8365mb_vlanmc_entry *vlanmc_null;
+	struct list_head vlanmc_synced;
 	struct mutex mib_lock;
 	struct rtl8365mb_port ports[RTL8365MB_MAX_NUM_PORTS];
 };
@@ -1213,6 +1238,299 @@ static void rtl8365mb_port_stp_state_set(struct dsa_switch *ds, int port,
 	regmap_update_bits(priv->map, RTL8365MB_MSTI_CTRL_REG(msti, port),
 			   RTL8365MB_MSTI_CTRL_PORT_STATE_MASK(port),
 			   val << RTL8365MB_MSTI_CTRL_PORT_STATE_OFFSET(port));
+}
+
+static struct rtl8365mb_vlanmc_entry *
+rtl8365mb_find_synced_vlanmc(struct realtek_priv *priv, u16 vid)
+{
+	struct rtl8365mb_vlanmc_entry *vlanmc_entry;
+	struct rtl8365mb *mb;
+
+	mb = priv->chip_data;
+
+	list_for_each_entry (vlanmc_entry, &mb->vlanmc_synced, list) {
+		if (vlanmc_entry->vlanmc.evid == vid)
+			return vlanmc_entry;
+	}
+
+	return NULL;
+}
+
+static struct rtl8365mb_vlanmc_entry *
+rtl8365mb_get_synced_vlanmc(struct realtek_priv *priv, u16 vid)
+{
+	struct rtl8365mb_vlanmc_entry *vlanmc_entry;
+	struct rtl8365mb *mb;
+
+	mb = priv->chip_data;
+
+	/* If it already exists, increase the refcount and return it */
+	vlanmc_entry = rtl8365mb_find_synced_vlanmc(priv, vid);
+	if (vlanmc_entry) {
+		refcount_inc(&vlanmc_entry->refcnt);
+		return vlanmc_entry;
+	}
+
+	/* Otherwise create a new entry, take an initial reference
+	 * count, and place it in the list of synced VLAN membership
+	 * config entries.
+	 */
+	vlanmc_entry = rtl8365mb_vlan_alloc_vlanmc_entry(&mb->vlanmc_db);
+	if (IS_ERR(vlanmc_entry))
+		return vlanmc_entry;
+
+	refcount_inc(&vlanmc_entry->refcnt);
+	list_add_tail(&vlanmc_entry->list, &mb->vlanmc_synced);
+
+	/* Only the VID is initialized - so that it can subsequently
+	 * be found in the list of synced VLAN membership
+	 * configs. Synchronization of VLAN membership config with
+	 * the VLAN4k table is handled separately.
+	 */
+	vlanmc_entry->vlanmc.evid = vid;
+
+	return vlanmc_entry;
+}
+
+static void rtl8365mb_put_synced_vlanmc(struct realtek_priv *priv, u16 vid)
+{
+	struct rtl8365mb_vlanmc_entry *vlanmc_entry;
+
+	vlanmc_entry = rtl8365mb_find_synced_vlanmc(priv, vid);
+	if (WARN_ON_ONCE(!vlanmc_entry))
+		return;
+
+	/* Decrement the reference counter. If there are no more
+	 * interested parties, remove it from the list and free the
+	 * entry.
+	 */
+	if (refcount_dec_and_test(&vlanmc_entry->refcnt)) {
+		list_del(&vlanmc_entry->list);
+		rtl8365mb_vlan_free_vlanmc_entry(vlanmc_entry);
+	}
+}
+
+static int rtl8365mb_sync_vlanmc(struct realtek_priv *priv,
+				 struct rtl8365mb_vlan4k *vlan4k)
+{
+	struct rtl8365mb_vlanmc_entry *vlanmc_entry =
+		rtl8365mb_find_synced_vlanmc(priv, vlan4k->vid);
+
+	/* If there is no synced VLAN membership config for this VLAN,
+	 * then there is nothing to do.
+	 */
+	if (!vlanmc_entry)
+		return 0;
+
+	vlanmc_entry->vlanmc.member = vlan4k->member;
+	vlanmc_entry->vlanmc.fid = vlan4k->fid;
+	vlanmc_entry->vlanmc.priority = vlan4k->priority;
+	vlanmc_entry->vlanmc.priority_en = vlan4k->priority_en;
+	vlanmc_entry->vlanmc.policing_en = vlan4k->policing_en;
+	vlanmc_entry->vlanmc.meteridx = vlan4k->meteridx;
+
+	return rtl8365mb_vlan_set_vlanmc_entry(priv, vlanmc_entry);
+}
+
+static int rtl8365mb_port_set_pvid(struct realtek_priv *priv, int port, u16 vid)
+{
+	struct rtl8365mb_vlanmc_entry *vlanmc_entry;
+	struct rtl8365mb_port *p;
+	struct rtl8365mb *mb;
+	int ret;
+
+	mb = priv->chip_data;
+	p = &mb->ports[port];
+
+	if (p->pvid == vid)
+		return 0;
+
+	/* Port-based VLAN IDs are set by specifying a VLAN membership
+	 * config index. The PVID will be determined by the settings
+	 * in that membership config. Realtek states that VLAN
+	 * membership configs are a vestige of older switch chips that
+	 * did not use the VLAN4k table. This design still permeates
+	 * some aspects of this switch family though, as evidenced
+	 * here.
+	 */
+
+	/* If a previous PVID was set, signal this port's disinterest
+	 * in keeping the VLAN membership config synced.
+	 */
+	if (p->pvid) {
+		rtl8365mb_put_synced_vlanmc(priv, p->pvid);
+		p->pvid = 0;
+	}
+
+	if (!vid) {
+		/* Remove the PVID by selecting the reserved "null"
+		 * VLAN membership config. This config is static and
+		 * does not require any syncing.
+		 */
+		vlanmc_entry = mb->vlanmc_null;
+	} else {
+		/* Program a new PVID by acquiring a synced VLAN
+		 * membership config. One will be created if not yet
+		 * present. All that matters here is knowing the
+		 * membership config index: the config itself will get
+		 * synced automatically with the VLAN4k table state.
+		 */
+		vlanmc_entry = rtl8365mb_get_synced_vlanmc(priv, vid);
+		if (IS_ERR(vlanmc_entry))
+			return PTR_ERR(vlanmc_entry);
+		p->pvid = vid;
+	}
+
+	ret = regmap_update_bits(
+		priv->map, RTL8365MB_VLAN_PVID_CTRL_REG(port),
+		RTL8365MB_VLAN_PVID_CTRL_PORT_MCIDX_MASK(port),
+		vlanmc_entry->index
+			<< RTL8365MB_VLAN_PVID_CTRL_PORT_MCIDX_OFFSET(port));
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int rtl8365mb_port_vlan_add(struct dsa_switch *ds, int port,
+				   const struct switchdev_obj_port_vlan *vlan,
+				   struct netlink_ext_ack *extack)
+{
+	bool untagged = !!(vlan->flags & BRIDGE_VLAN_INFO_UNTAGGED);
+	bool pvid = !!(vlan->flags & BRIDGE_VLAN_INFO_PVID);
+	struct rtl8365mb_vlan4k vlan4k = { 0 };
+	struct realtek_priv *priv = ds->priv;
+	int ret;
+
+	dev_info(priv->dev, "add VLAN %d on port %d, %s, %s\n", vlan->vid, port,
+		 untagged ? "untagged" : "tagged", pvid ? "PVID" : "no PVID");
+
+	/* Add this port to the given VLAN in the VLAN4k table */
+	ret = rtl8365mb_vlan_get_vlan4k(priv, vlan->vid, &vlan4k);
+	if (ret)
+		return ret;
+
+	vlan4k.member |= BIT(port);
+	vlan4k.untag |= untagged ? BIT(port) : 0;
+	vlan4k.ivl_en = true; /* always use Independent VLAN Learning */
+
+	ret = rtl8365mb_vlan_set_vlan4k(priv, &vlan4k);
+	if (ret)
+		return ret;
+
+	/* Update the PVID */
+	ret = rtl8365mb_port_set_pvid(priv, port, pvid ? vlan4k.vid : 0);
+	if (ret)
+		return ret;
+
+	/* Sync VLAN membership config if necessary */
+	ret = rtl8365mb_sync_vlanmc(priv, &vlan4k);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int rtl8365mb_port_vlan_del(struct dsa_switch *ds, int port,
+			    const struct switchdev_obj_port_vlan *vlan)
+{
+	struct rtl8365mb_vlan4k vlan4k = { 0 };
+	struct realtek_priv *priv = ds->priv;
+	struct rtl8365mb_port *p;
+	struct rtl8365mb *mb;
+	int ret;
+
+	mb = priv->chip_data;
+	p = &mb->ports[port];
+
+	dev_info(priv->dev, "del VLAN %d on port %d\n", vlan->vid, port);
+
+	/* Remove this port from the given VLAN in the VLAN4k table */
+	ret = rtl8365mb_vlan_get_vlan4k(priv, vlan->vid, &vlan4k);
+	if (ret)
+		return ret;
+
+	vlan4k.member &= ~BIT(port);
+	vlan4k.untag &= ~BIT(port);
+
+	ret = rtl8365mb_vlan_set_vlan4k(priv, &vlan4k);
+	if (ret)
+		return ret;
+
+	/* Remove the PVID if the corresponding VLAN is being deleted */
+	if (p->pvid == vlan->vid) {
+		ret = rtl8365mb_port_set_pvid(priv, port, 0);
+		if (ret)
+			return ret;
+	}
+
+	/* Sync VLAN membership config if necessary */
+	ret = rtl8365mb_sync_vlanmc(priv, &vlan4k);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int rtl8365mb_vlan_setup(struct realtek_priv *priv)
+{
+	struct rtl8365mb *mb = priv->chip_data;
+	int ret;
+
+	INIT_LIST_HEAD(&mb->vlanmc_synced);
+
+	/* Initialize the reserved "null" VLAN membership config. This
+	 * is used when programming a port to have no PVID. On switch
+	 * reset, all ports should have their PVID determined by the
+	 * VLAN membership config with index 0, so for convenience
+	 * this is the first entry allocated. The result is no PVID by
+	 * default, for all ports.
+	 */
+	mb->vlanmc_null = rtl8365mb_vlan_alloc_vlanmc_entry(&mb->vlanmc_db);
+	if (IS_ERR(mb->vlanmc_null))
+		return PTR_ERR(mb->vlanmc_null);
+
+	/* Sanity check just in case changes are made to the allocator */
+	WARN_ON(mb->vlanmc_null->index != 0);
+
+	ret = rtl8365mb_vlan_set_vlanmc_entry(priv, mb->vlanmc_null);
+	if (ret)
+		goto out_free_vlanmc_null;
+
+	/* Enable VLAN functionality on the switch */
+	ret = regmap_update_bits(priv->map, RTL8365MB_VLAN_CTRL_REG,
+				 RTL8365MB_VLAN_CTRL_EN_MASK,
+				 FIELD_PREP(RTL8365MB_VLAN_CTRL_EN_MASK, 1));
+	if (ret)
+		goto out_free_vlanmc_null;
+
+	return 0;
+
+out_free_vlanmc_null:
+	rtl8365mb_vlan_free_vlanmc_entry(mb->vlanmc_null);
+
+	return ret;
+}
+
+static void rtl8365mb_vlan_teardown(struct realtek_priv *priv)
+{
+	struct rtl8365mb *mb = priv->chip_data;
+	int i;
+
+	for (i = 0; i < priv->num_ports; i++) {
+		struct rtl8365mb_port *p = &mb->ports[i];
+
+		if (dsa_is_unused_port(&priv->ds, i))
+			continue;
+
+		if (p->pvid) {
+			rtl8365mb_put_synced_vlanmc(priv, p->pvid);
+			p->pvid = 0;
+		}
+	}
+
+	rtl8365mb_vlan_free_vlanmc_entry(mb->vlanmc_null);
+	mb->vlanmc_null = NULL;
 }
 
 static int rtl8365mb_port_set_learning(struct realtek_priv *priv, int port,
@@ -2235,19 +2553,32 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 	}
 
 	ret = rtl8365mb_port_change_mtu(ds, cpu->trap_port, ETH_DATA_LEN);
+	
+	/* Set up VLAN */
+	ret = rtl8365mb_vlan_setup(priv);
 	if (ret)
 		goto out_teardown_irq;
+
+	/* Set maximum packet length to 1536 bytes */
+	ret = regmap_update_bits(priv->map, RTL8365MB_CFG0_MAX_LEN_REG,
+				 RTL8365MB_CFG0_MAX_LEN_MASK,
+				 FIELD_PREP(RTL8365MB_CFG0_MAX_LEN_MASK, 1536));
+	if (ret)
+		goto out_teardown_vlan;
 
 	ret = rtl83xx_setup_user_mdio(ds);
 	if (ret) {
 		dev_err(priv->dev, "could not set up MDIO bus\n");
-		goto out_teardown_irq;
+		goto out_teardown_vlan;
 	}
 
 	/* Start statistics counter polling */
 	rtl8365mb_stats_setup(priv);
 
 	return 0;
+
+out_teardown_vlan:
+	rtl8365mb_vlan_teardown(priv);
 
 out_teardown_irq:
 	rtl8365mb_irq_teardown(priv);
@@ -2261,6 +2592,7 @@ static void rtl8365mb_teardown(struct dsa_switch *ds)
 	struct realtek_priv *priv = ds->priv;
 
 	rtl8365mb_stats_teardown(priv);
+	rtl8365mb_vlan_teardown(priv);
 	rtl8365mb_irq_teardown(priv);
 }
 
@@ -2352,6 +2684,8 @@ static const struct dsa_switch_ops rtl8365mb_switch_ops = {
 	.port_pre_bridge_flags = rtl8365mb_port_pre_bridge_flags,
 	.port_bridge_flags = rtl8365mb_port_bridge_flags,
 	.port_stp_state_set = rtl8365mb_port_stp_state_set,
+	.port_vlan_add = rtl8365mb_port_vlan_add,
+	.port_vlan_del = rtl8365mb_port_vlan_del,
 	.get_strings = rtl8365mb_get_strings,
 	.get_ethtool_stats = rtl8365mb_get_ethtool_stats,
 	.get_sset_count = rtl8365mb_get_sset_count,
