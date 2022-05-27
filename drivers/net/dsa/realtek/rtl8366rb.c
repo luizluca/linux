@@ -1793,7 +1793,7 @@ static int rtl8366rb_detect(struct realtek_priv *priv)
 	return 0;
 }
 
-static const struct dsa_switch_ops rtl8366rb_switch_ops_smi = {
+static const struct dsa_switch_ops rtl8366rb_switch_ops_custom_slavemii = {
 	.get_tag_protocol = rtl8366_get_tag_protocol,
 	.setup = rtl8366rb_setup,
 	.phylink_mac_link_up = rtl8366rb_mac_link_up,
@@ -1816,7 +1816,7 @@ static const struct dsa_switch_ops rtl8366rb_switch_ops_smi = {
 	.port_max_mtu = rtl8366rb_max_mtu,
 };
 
-static const struct dsa_switch_ops rtl8366rb_switch_ops_mdio = {
+static const struct dsa_switch_ops rtl8366rb_switch_ops = {
 	.get_tag_protocol = rtl8366_get_tag_protocol,
 	.setup = rtl8366rb_setup,
 	.phy_read = rtl8366rb_dsa_phy_read,
@@ -1858,8 +1858,8 @@ static const struct realtek_ops rtl8366rb_ops = {
 };
 
 const struct realtek_variant rtl8366rb_variant = {
-	.ds_ops_smi = &rtl8366rb_switch_ops_smi,
-	.ds_ops_mdio = &rtl8366rb_switch_ops_mdio,
+	.ds_ops_custom_slavemii = &rtl8366rb_switch_ops_custom_slavemii,
+	.ds_ops = &rtl8366rb_switch_ops,
 	.ops = &rtl8366rb_ops,
 	.clk_delay = 10,
 	.cmd_read = 0xa9,

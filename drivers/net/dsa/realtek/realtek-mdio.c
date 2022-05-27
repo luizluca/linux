@@ -225,7 +225,7 @@ static int realtek_mdio_probe(struct mdio_device *mdiodev)
 	priv->ds->dev = dev;
 	priv->ds->num_ports = priv->num_ports;
 	priv->ds->priv = priv;
-	priv->ds->ops = var->ds_ops_mdio;
+	priv->ds->ops = var->ds_ops;
 
 	ret = dsa_register_switch(priv->ds);
 	if (ret) {
