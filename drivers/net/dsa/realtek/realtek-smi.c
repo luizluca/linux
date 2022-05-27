@@ -379,6 +379,10 @@ static int realtek_smi_setup_mdio(struct dsa_switch *ds)
 		return -ENODEV;
 	}
 
+	dev_warn(priv->dev,
+		 "Rename '%s' to 'mdio' and remove the compatible string\n",
+		  mdio_np->full_name);
+
 	priv->slave_mii_bus = devm_mdiobus_alloc(priv->dev);
 	if (!priv->slave_mii_bus) {
 		ret = -ENOMEM;
@@ -412,10 +416,10 @@ err_put_node:
 static int realtek_smi_probe(struct platform_device *pdev)
 {
 	const struct realtek_variant *var;
+	struct device_node *np, *mdio_np;
 	struct device *dev = &pdev->dev;
 	struct realtek_priv *priv;
 	struct regmap_config rc;
-	struct device_node *np;
 	int ret;
 
 	var = of_device_get_match_data(dev);
@@ -452,7 +456,6 @@ static int realtek_smi_probe(struct platform_device *pdev)
 	priv->cmd_write = var->cmd_write;
 	priv->ops = var->ops;
 
-	priv->setup_interface = realtek_smi_setup_mdio;
 	priv->write_reg_noack = realtek_smi_write_reg_noack;
 
 	dev_set_drvdata(dev, priv);
@@ -497,8 +500,20 @@ static int realtek_smi_probe(struct platform_device *pdev)
 	priv->ds->dev = dev;
 	priv->ds->num_ports = priv->num_ports;
 	priv->ds->priv = priv;
+	priv->ds->ops = var->ds_ops;
 
-	priv->ds->ops = var->ds_ops_custom_slavemii;
+	mdio_np = of_get_child_by_name(np, "mdio");
+	if (mdio_np) {
+		if (of_device_is_compatible(mdio_np, "realtek,smi-mdio"))
+			dev_warn(dev, "Remove deprecated prop '%s' from '%s'",
+				 "compatible = \"realtek,smi-mdio\"",
+				 mdio_np->full_name);
+		of_node_put(mdio_np);
+	} else {
+		priv->ds->ops = var->ds_ops_custom_slavemii;
+		priv->setup_interface = realtek_smi_setup_mdio;
+	}
+
 	ret = dsa_register_switch(priv->ds);
 	if (ret) {
 		dev_err_probe(dev, ret, "unable to register switch\n");
