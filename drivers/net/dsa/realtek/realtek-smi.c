@@ -352,67 +352,6 @@ static const struct regmap_config realtek_smi_nolock_regmap_config = {
 	.disable_locking = true,
 };
 
-static int realtek_smi_mdio_read(struct mii_bus *bus, int addr, int regnum)
-{
-	struct realtek_priv *priv = bus->priv;
-
-	return priv->ops->phy_read(priv, addr, regnum);
-}
-
-static int realtek_smi_mdio_write(struct mii_bus *bus, int addr, int regnum,
-				  u16 val)
-{
-	struct realtek_priv *priv = bus->priv;
-
-	return priv->ops->phy_write(priv, addr, regnum, val);
-}
-
-static int realtek_smi_setup_mdio(struct dsa_switch *ds)
-{
-	struct realtek_priv *priv =  ds->priv;
-	struct device_node *mdio_np;
-	int ret;
-
-	mdio_np = of_get_compatible_child(priv->dev->of_node, "realtek,smi-mdio");
-	if (!mdio_np) {
-		dev_err(priv->dev, "no MDIO bus node\n");
-		return -ENODEV;
-	}
-
-	dev_warn(priv->dev,
-		 "Rename '%s' to 'mdio' and remove the compatible string\n",
-		  mdio_np->full_name);
-
-	priv->slave_mii_bus = devm_mdiobus_alloc(priv->dev);
-	if (!priv->slave_mii_bus) {
-		ret = -ENOMEM;
-		goto err_put_node;
-	}
-	priv->slave_mii_bus->priv = priv;
-	priv->slave_mii_bus->name = "SMI slave MII";
-	priv->slave_mii_bus->read = realtek_smi_mdio_read;
-	priv->slave_mii_bus->write = realtek_smi_mdio_write;
-	snprintf(priv->slave_mii_bus->id, MII_BUS_ID_SIZE, "SMI-%d",
-		 ds->index);
-	priv->slave_mii_bus->dev.of_node = mdio_np;
-	priv->slave_mii_bus->parent = priv->dev;
-	ds->slave_mii_bus = priv->slave_mii_bus;
-
-	ret = devm_of_mdiobus_register(priv->dev, priv->slave_mii_bus, mdio_np);
-	if (ret) {
-		dev_err(priv->dev, "unable to register MDIO bus %s\n",
-			priv->slave_mii_bus->id);
-		goto err_put_node;
-	}
-
-	return 0;
-
-err_put_node:
-	of_node_put(mdio_np);
-
-	return ret;
-}
-
 static int realtek_smi_probe(struct platform_device *pdev)
 {
 	const struct realtek_variant *var;
@@ -510,8 +449,14 @@ static int realtek_smi_probe(struct platform_device *pdev)
 				 mdio_np->full_name);
 		of_node_put(mdio_np);
 	} else {
-		priv->ds->ops = var->ds_ops_custom_slavemii;
-		priv->setup_interface = realtek_smi_setup_mdio;
+		mdio_np = of_get_compatible_child(priv->dev->of_node,
+						  "realtek,smi-mdio");
+		if (mdio_np) {
+			dev_err(priv->dev,
+				"Rename '%s' to 'mdio' and remove the compatible string\n",
+				mdio_np->full_name);
+			of_node_put(mdio_np);
+		}
 	}
 
 	ret = dsa_register_switch(priv->ds);
