@@ -105,6 +105,7 @@
 #include "realtek-mdio.h"
 #include "rtl83xx.h"
 #include "rtl8365mb_vlan.h"
+#include "rtl8365mb_l2.h"
 
 /* Family-specific data and limits */
 #define RTL8365MB_PHYADDRMAX		7
@@ -112,7 +113,6 @@
 #define RTL8365MB_PHYREGMAX		(RTL8365MB_NUM_PHYREGS - 1)
 #define RTL8365MB_MAX_NUM_PORTS		11
 #define RTL8365MB_MAX_NUM_EXTINTS	3
-#define RTL8365MB_LEARN_LIMIT_MAX	2112
 
 /* Chip identification registers */
 #define RTL8365MB_CHIP_ID_REG		0x1300
