@@ -104,8 +104,8 @@
 #include "realtek-smi.h"
 #include "realtek-mdio.h"
 #include "rtl83xx.h"
-#include "rtl8365mb_vlan.h"
 #include "rtl8365mb_l2.h"
+#include "rtl8365mb_vlan.h"
 
 /* Family-specific data and limits */
 #define RTL8365MB_PHYADDRMAX		7
@@ -675,7 +675,9 @@ struct rtl8365mb_port {
  * @vlanmc_synced: VLAN membership configs that should be synced with
  *                 the VLAN4k table
  * @mib_lock: prevent concurrent reads of MIB counters
+ * @l2_lock: prevent concurrent access to L2 look-up table
  * @ports: per-port data
+ * @debugfs_dir: debugfs directory
  *
  * Private data for this driver.
  */
@@ -688,7 +690,9 @@ struct rtl8365mb {
 	struct rtl8365mb_vlanmc_entry *vlanmc_null;
 	struct list_head vlanmc_synced;
 	struct mutex mib_lock;
+	struct mutex l2_lock;
 	struct rtl8365mb_port ports[RTL8365MB_MAX_NUM_PORTS];
+	struct dentry *debugfs_dir;
 };
 
 static int rtl8365mb_phy_poll_busy(struct realtek_priv *priv)
@@ -1240,6 +1244,20 @@ static void rtl8365mb_port_stp_state_set(struct dsa_switch *ds, int port,
 			   val << RTL8365MB_MSTI_CTRL_PORT_STATE_OFFSET(port));
 }
 
+static void rtl8365mb_port_fast_age(struct dsa_switch *ds, int port)
+{
+	struct realtek_priv *priv = ds->priv;
+	struct rtl8365mb *mb = priv->chip_data;
+	int ret;
+
+	mutex_lock(&mb->l2_lock);
+	ret = rtl8365mb_l2_flush(priv, port, 0);
+	mutex_unlock(&mb->l2_lock);
+	if (ret)
+		dev_err(priv->dev, "failed to fast age on port %d: %d\n", port,
+			ret);
+}
+
 static struct rtl8365mb_vlanmc_entry *
 rtl8365mb_find_synced_vlanmc(struct realtek_priv *priv, u16 vid)
 {
@@ -1531,6 +1549,199 @@ static void rtl8365mb_vlan_teardown(struct realtek_priv *priv)
 
 	rtl8365mb_vlan_free_vlanmc_entry(mb->vlanmc_null);
 	mb->vlanmc_null = NULL;
+}
+
+static int rtl8365mb_port_fdb_add(struct dsa_switch *ds, int port,
+				  const unsigned char *addr, u16 vid,
+				  struct dsa_db db)
+{
+	struct realtek_priv *priv = ds->priv;
+	struct rtl8365mb_l2_uc uc = {
+		.key = {
+			.efid = db.type == DSA_DB_BRIDGE ? db.bridge.num : 0,
+			.ivl = true,
+			.vid = vid,
+		},
+		.port = port,
+		.is_static = true,
+		.age = 6, // TODO
+	};
+	struct rtl8365mb *mb = priv->chip_data;
+	int ret;
+
+	// TODO: standlone mode adds entrie(s) in DSA_DB_PORT, should efid be 0?
+	if (db.type != DSA_DB_PORT && db.type != DSA_DB_BRIDGE)
+		return -EOPNOTSUPP;
+
+	dev_info(priv->dev, "fdb_add port %d addr %pM efid %d vid %d\n",
+		 port, addr, uc.key.efid, vid);
+
+	memcpy(uc.key.mac_addr, addr, ETH_ALEN);
+
+	mutex_lock(&mb->l2_lock);
+	ret = rtl8365mb_l2_add_uc(priv, &uc);
+	if (ret)
+	  dev_info(priv->dev, "XXX fdb_add ERROR %d\n", ret);
+	mutex_unlock(&mb->l2_lock);
+
+	return ret;
+}
+
+static int rtl8365mb_port_fdb_del(struct dsa_switch *ds, int port,
+				  const unsigned char *addr, u16 vid,
+				  struct dsa_db db)
+{
+	struct realtek_priv *priv = ds->priv;
+	struct rtl8365mb_l2_uc_key key = {
+		.efid = db.type == DSA_DB_BRIDGE ? db.bridge.num : 0,
+		.ivl = true,
+		.vid = vid,
+	};
+	struct rtl8365mb *mb = priv->chip_data;
+	int ret;
+
+	// TODO: standlone mode adds entrie(s) in DSA_DB_PORT, should efid be 0?
+	if (db.type != DSA_DB_PORT && db.type != DSA_DB_BRIDGE)
+		return -EOPNOTSUPP;
+
+	dev_info(priv->dev, "fdb_del port %d addr %pM efid %d vid %d\n",
+		 port, addr, key.efid, vid);
+
+	memcpy(key.mac_addr, addr, ETH_ALEN);
+
+	mutex_lock(&mb->l2_lock);
+	ret = rtl8365mb_l2_del_uc(priv, &key);
+	mutex_unlock(&mb->l2_lock);
+
+	return ret;
+}
+
+static int rtl8365mb_port_fdb_dump(struct dsa_switch *ds, int port,
+				   dsa_fdb_dump_cb_t *cb, void *data)
+{
+	struct realtek_priv *priv = ds->priv;
+	struct rtl8365mb_l2_uc uc;
+	int first_addr;
+	int addr = 0;
+	int ret;
+
+	/* Walk the L2 unicast entries of the switch forwarding database */
+	ret = rtl8365mb_l2_get_next_uc(priv, &addr, &uc);
+	if (ret == -ENOENT)
+		return 0; /* The database is empty - not an error */
+	else if (ret)
+		return ret;
+
+	/* Mark where we started, so that we don't loop forever */
+	first_addr = addr;
+
+	do {
+		if (uc.port == port)
+			cb(uc.key.mac_addr, uc.key.vid, uc.is_static, data);
+
+		/* Don't overshoot the look-up table size */
+		// TODO what if the hardware overshoots? saw this before
+		if (++addr >= RTL8365MB_LEARN_LIMIT_MAX)
+			break;
+
+		ret = rtl8365mb_l2_get_next_uc(priv, &addr, &uc);
+		if (ret)
+			return ret;
+	} while (addr > first_addr);
+
+	return 0;
+}
+
+static int rtl8365mb_port_mdb_add(struct dsa_switch *ds, int port,
+				  const struct switchdev_obj_port_mdb *mdb,
+				  struct dsa_db db)
+{
+	struct realtek_priv *priv = ds->priv;
+	struct rtl8365mb_l2_mc_key key = {
+		.ivl = true,
+		.vid = mdb->vid,
+	};
+	struct rtl8365mb_l2_mc mc = { 0 };
+	bool new_entry = false;
+	int ret;
+	struct rtl8365mb *mb = priv->chip_data;
+
+	if (db.type != DSA_DB_PORT && db.type != DSA_DB_BRIDGE)
+		return -EOPNOTSUPP;
+
+	memcpy(mc.key.mac_addr, &mdb->addr, ETH_ALEN);
+
+	mutex_lock(&mb->l2_lock);
+
+	ret = rtl8365mb_l2_get_mc(priv, &key, &mc);
+	if (ret == -ENOENT)
+		new_entry = true;
+	else if (ret) {
+		mutex_unlock(&mb->l2_lock);
+		return ret;
+	}
+
+	if (new_entry) {
+		memset(&mc, 0, sizeof(mc));
+		mc.key = key;
+	}
+
+	mc.member |= BIT(port);
+
+	ret = rtl8365mb_l2_add_mc(priv, &mc);
+	mutex_unlock(&mb->l2_lock);
+
+	return ret;
+}
+
+static int rtl8365mb_port_mdb_del(struct dsa_switch *ds, int port,
+				  const struct switchdev_obj_port_mdb *mdb,
+				  struct dsa_db db)
+{
+	struct realtek_priv *priv = ds->priv;
+	struct rtl8365mb_l2_mc_key key = {
+		.ivl = true,
+		.vid = mdb->vid,
+	};
+	struct rtl8365mb_l2_mc mc = { 0 };
+	int ret;
+	struct rtl8365mb *mb = priv->chip_data;
+
+	if (db.type != DSA_DB_PORT && db.type != DSA_DB_BRIDGE)
+		return -EOPNOTSUPP;
+
+	memcpy(mc.key.mac_addr, &mdb->addr, ETH_ALEN);
+
+	mutex_lock(&mb->l2_lock);
+
+	ret = rtl8365mb_l2_get_mc(priv, &key, &mc);
+	if (ret) {
+		mutex_unlock(&mb->l2_lock);
+		return ret;
+	}
+
+	/* Remove this port from the multicast membership. If there are no more
+	 * ports in this multicast group, delete the L2 multicast database entry
+	 * altogether.
+	 */
+	mc.member &= ~BIT(port);
+	if (!mc.member) {
+		ret = rtl8365mb_l2_del_mc(priv, &key);
+		mutex_unlock(&mb->l2_lock);
+		return ret;
+	}
+
+	/* Otherwise just update */
+	/* TODO: should mc be get/set rather than get/add/del? need to debug
+	   the behaviour of the LUT to understand how it treats entries which
+	   are "dead". notions of deadness:
+	    - unicast: age == 0 && is_static == 0
+	    - multicast: member == 0, that's all right?
+	*/
+	ret = rtl8365mb_l2_add_mc(priv, &mc);
+	mutex_unlock(&mb->l2_lock);
+
+	return ret;
 }
 
 static int rtl8365mb_port_set_learning(struct realtek_priv *priv, int port,
@@ -2575,6 +2786,8 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 	/* Start statistics counter polling */
 	rtl8365mb_stats_setup(priv);
 
+	mutex_init(&mb->l2_lock);
+
 	return 0;
 
 out_teardown_vlan:
@@ -2684,8 +2897,14 @@ static const struct dsa_switch_ops rtl8365mb_switch_ops = {
 	.port_pre_bridge_flags = rtl8365mb_port_pre_bridge_flags,
 	.port_bridge_flags = rtl8365mb_port_bridge_flags,
 	.port_stp_state_set = rtl8365mb_port_stp_state_set,
+	.port_fast_age = rtl8365mb_port_fast_age,
 	.port_vlan_add = rtl8365mb_port_vlan_add,
 	.port_vlan_del = rtl8365mb_port_vlan_del,
+	.port_fdb_add = rtl8365mb_port_fdb_add,
+	.port_fdb_del = rtl8365mb_port_fdb_del,
+	.port_fdb_dump = rtl8365mb_port_fdb_dump,
+	.port_mdb_add = rtl8365mb_port_mdb_add,
+	.port_mdb_del = rtl8365mb_port_mdb_del,
 	.get_strings = rtl8365mb_get_strings,
 	.get_ethtool_stats = rtl8365mb_get_ethtool_stats,
 	.get_sset_count = rtl8365mb_get_sset_count,
