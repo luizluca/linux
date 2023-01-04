@@ -1760,6 +1760,76 @@ static int rtl8365mb_port_max_mtu(struct dsa_switch *ds, int port)
 	return RTL8365MB_CFG0_MAX_LEN_MAX - VLAN_ETH_HLEN - ETH_FCS_LEN;
 }
 
+static int
+rtl8365mb_port_bridge_join(struct dsa_switch *ds, int port,
+			   struct dsa_bridge bridge,
+			   bool *tx_fwd_offload,
+			   struct netlink_ext_ack *extack)
+{
+	struct realtek_priv *priv = ds->priv;
+	unsigned int port_bitmap = 0;
+	struct dsa_port *dp;
+	int ret;
+
+	dsa_switch_for_each_available_port(dp, ds) {
+		/* Current port handled last */
+		if (port == dp->index)
+			continue;
+
+		/* Not on this bridge */
+		if (!dsa_port_offloads_bridge(dp, &bridge))
+			continue;
+
+		/* Join this port to each other port on the bridge */
+		ret = regmap_update_bits(priv->map,
+					 RTL8365MB_PORT_ISOLATION_REG(dp->index),
+					 BIT(port), BIT(port));
+		if (ret)
+			dev_err(priv->dev, "failed to join port %d\n", port);
+
+		port_bitmap |= BIT(dp->index);
+	}
+
+	/* Set the bits for the ports we can access */
+	return regmap_update_bits(priv->map,
+				  RTL8365MB_PORT_ISOLATION_REG(port),
+				  port_bitmap, port_bitmap);
+}
+
+static void
+rtl8365mb_port_bridge_leave(struct dsa_switch *ds, int port,
+			    struct dsa_bridge bridge)
+{
+	struct realtek_priv *priv = ds->priv;
+	unsigned int port_bitmap = 0;
+	struct dsa_port *dp;
+	int ret;
+
+	dsa_switch_for_each_available_port(dp, ds) {
+		/* Current port handled last */
+		if (port == dp->index)
+			continue;
+
+		/* Not on this bridge */
+		if (!dsa_port_offloads_bridge(dp, &bridge))
+			continue;
+
+		/* Remove this port from any other port on the bridge */
+		ret = regmap_update_bits(priv->map,
+					 RTL8365MB_PORT_ISOLATION_REG(dp->index),
+					 BIT(port), 0);
+		if (ret)
+			dev_err(priv->dev, "failed to leave port %d\n", port);
+
+		port_bitmap |= BIT(dp->index);
+	}
+
+	/* Clear the bits for the ports we can not access, leave ourselves */
+	regmap_update_bits(priv->map,
+			   RTL8365MB_PORT_ISOLATION_REG(port),
+			   port_bitmap, 0);
+}
+
 static void rtl8365mb_port_stp_state_set(struct dsa_switch *ds, int port,
 					 u8 state)
 {
@@ -1801,6 +1871,30 @@ static int rtl8365mb_port_set_learning(struct realtek_priv *priv, int port,
 	 */
 	return regmap_write(priv->map, RTL8365MB_LUT_PORT_LEARN_LIMIT_REG(port),
 			    enable ? RTL8365MB_LEARN_LIMIT_MAX : 0);
+}
+
+static int
+rtl8365mb_port_pre_bridge_flags(struct dsa_switch *ds, int port,
+				struct switchdev_brport_flags flags,
+				struct netlink_ext_ack *extack)
+{
+	/* We support enabling/disabling learning */
+	if (flags.mask & ~(BR_LEARNING))
+		return -EINVAL;
+
+	return 0;
+}
+
+static int
+rtl8365mb_port_bridge_flags(struct dsa_switch *ds, int port,
+			    struct switchdev_brport_flags flags,
+			    struct netlink_ext_ack *extack)
+{
+	if (flags.mask & BR_LEARNING)
+		return rtl8365mb_port_set_learning(ds->priv, port,
+						   !!(flags.val & BR_LEARNING));
+
+	return 0;
 }
 
 static int rtl8365mb_port_set_isolation(struct realtek_priv *priv, int port,
@@ -2539,6 +2633,7 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 	struct rtl8365mb_cpu *cpu;
 	struct dsa_port *cpu_dp;
 	struct rtl8365mb *mb;
+	u32 user_ports;
 	int ret;
 	int i;
 
@@ -2565,9 +2660,15 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 	else if (ret)
 		dev_info(priv->dev, "no interrupt support\n");
 
+	user_ports = dsa_user_ports(ds);
+
 	/* Configure CPU tagging */
 	dsa_switch_for_each_cpu_port(cpu_dp, priv->ds) {
 		cpu->mask |= BIT(cpu_dp->index);
+
+		/* Forward to all user ports */
+		ret = rtl8365mb_port_set_isolation(priv, cpu_dp->index,
+						   user_ports);
 
 		if (cpu->trap_port == RTL8365MB_MAX_NUM_PORTS)
 			cpu->trap_port = cpu_dp->index;
@@ -2745,6 +2846,10 @@ static const struct dsa_switch_ops rtl8365mb_switch_ops_smi = {
 	.port_vlan_add = rtl8365mb_vlan_add,
 	.port_vlan_del = rtl8365mb_vlan_del,
 	.port_vlan_filtering = rtl8365mb_vlan_filtering,
+	.port_bridge_join = rtl8365mb_port_bridge_join,
+	.port_bridge_leave = rtl8365mb_port_bridge_leave,
+	.port_bridge_flags = rtl8365mb_port_bridge_flags,
+	.port_pre_bridge_flags = rtl8365mb_port_pre_bridge_flags,
 };
 
 static const struct dsa_switch_ops rtl8365mb_switch_ops_mdio = {
@@ -2771,6 +2876,10 @@ static const struct dsa_switch_ops rtl8365mb_switch_ops_mdio = {
 	.port_vlan_add = rtl8365mb_vlan_add,
 	.port_vlan_del = rtl8365mb_vlan_del,
 	.port_vlan_filtering = rtl8365mb_vlan_filtering,
+	.port_bridge_join = rtl8365mb_port_bridge_join,
+	.port_bridge_leave = rtl8365mb_port_bridge_leave,
+	.port_bridge_flags = rtl8365mb_port_bridge_flags,
+	.port_pre_bridge_flags = rtl8365mb_port_pre_bridge_flags,
 };
 
 static const struct realtek_ops rtl8365mb_ops = {
