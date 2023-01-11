@@ -89,6 +89,18 @@
 	})
 
 /**
+ * FIELD_WIDTH() - returns the number of bits in the field
+ * @_mask: shifted mask defining the field's length and position
+ *
+ * FIELD_WITDH() returns the number of 1-bit specified by @_mask.
+ */
+#define FIELD_WIDTH(_mask)						\
+	({								\
+		__BF_FIELD_CHECK(_mask, 0ULL, 0ULL, "FIELD_MAX: ");	\
+		__bf_shf(~FIELD_MAX(_mask));				\
+	})
+
+/**
  * FIELD_FIT() - check if value fits in the field
  * @_mask: shifted mask defining the field's length and position
  * @_val:  value to test against the field
