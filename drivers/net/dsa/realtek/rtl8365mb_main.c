@@ -3106,6 +3106,12 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 	if (ret)
 		goto out_teardown_irq;
 
+	ds->configure_vlan_while_not_filtering = true;
+	ds->assisted_learning_on_cpu_port = true;
+	ds->fdb_isolation = true;
+	/* The EFID is 3 bits, but EFID 0 is reserved for standalone ports */
+	ds->max_num_bridges = 7;
+
 	/* Set maximum packet length to 1536 bytes */
 	ret = regmap_update_bits(priv->map, RTL8365MB_CFG0_MAX_LEN_REG,
 				 RTL8365MB_CFG0_MAX_LEN_MASK,
