@@ -104,6 +104,7 @@
 #include "realtek-smi.h"
 #include "realtek-mdio.h"
 #include "rtl83xx.h"
+#include "rtl8365mb_acl.h"
 #include "rtl8365mb_l2.h"
 #include "rtl8365mb_vlan.h"
 
@@ -112,6 +113,7 @@
 #define RTL8365MB_NUM_PHYREGS		32
 #define RTL8365MB_PHYREGMAX		(RTL8365MB_NUM_PHYREGS - 1)
 #define RTL8365MB_MAX_NUM_PORTS		11
+#define RTL8365MB_PORTMASK		GENMASK(RTL8365MB_MAX_NUM_PORTS - 1, 0)
 #define RTL8365MB_MAX_NUM_EXTINTS	3
 
 /* Chip identification registers */
@@ -323,9 +325,71 @@
 #define   RTL8365MB_VLAN_PVID_CTRL_PORT_MCIDX_MASK(_p) \
 		(0x1F << RTL8365MB_VLAN_PVID_CTRL_PORT_MCIDX_OFFSET(_p))
 
+/* Miscellaneous port configuration register, incl. VLAN egress mode */
+#define RTL8365MB_PORT_MISC_CFG_REG_BASE			0x000E
+#define RTL8365MB_PORT_MISC_CFG_REG(_p) \
+		(RTL8365MB_PORT_MISC_CFG_REG_BASE + ((_p) << 5))
+#define   RTL8365MB_PORT_MISC_CFG_SMALL_TAG_IPG_MASK		0x8000
+#define   RTL8365MB_PORT_MISC_CFG_TX_ITFSP_MODE_MASK		0x4000
+#define   RTL8365MB_PORT_MISC_CFG_FLOWCTRL_INDEP_MASK		0x2000
+#define   RTL8365MB_PORT_MISC_CFG_DOT1Q_REMARK_ENABLE_MASK	0x1000
+#define   RTL8365MB_PORT_MISC_CFG_INGRESSBW_FLOWCTRL_MASK	0x0800
+#define   RTL8365MB_PORT_MISC_CFG_INGRESSBW_IFG_MASK		0x0400
+#define   RTL8365MB_PORT_MISC_CFG_RX_SPC_MASK			0x0200
+#define   RTL8365MB_PORT_MISC_CFG_CRC_SKIP_MASK			0x0100
+#define   RTL8365MB_PORT_MISC_CFG_PKTGEN_TX_FIRST_MASK		0x0080
+#define   RTL8365MB_PORT_MISC_CFG_MAC_LOOPBACK_MASK		0x0040
+#define   RTL8365MB_PORT_MISC_CFG_VLAN_EGRESS_MODE_MASK		0x0030
+#define	    RTL8365MB_PORT_MISC_CFG_VLAN_EGRESS_MODE_ORIGINAL	0
+#define	    RTL8365MB_PORT_MISC_CFG_VLAN_EGRESS_MODE_KEEP	1
+#define	    RTL8365MB_PORT_MISC_CFG_VLAN_EGRESS_MODE_PRI_TAG	2
+#define	    RTL8365MB_PORT_MISC_CFG_VLAN_EGRESS_MODE_REAL_KEEP	3
+#define   RTL8365MB_PORT_MISC_CFG_CONGESTION_SUSTAIN_TIME_MASK	0x000F
+
+/**
+ * enum rtl8365mb_vlan_egress_mode - port VLAN engress mode
+ * @RTL8365MB_VLAN_EGRESS_MODE_ORIGINAL: follow untag mask in VLAN4k table entry
+ * @RTL8365MB_VLAN_EGRESS_MODE_KEEP: the VLAN tag format of egressed packets
+ * will remain the same as their ingressed format, but the priority and VID
+ * fields may be altered
+ * @RTL8365MB_VLAN_EGRESS_MODE_PRI_TAG: always egress with priority tag
+ * @RTL8365MB_VLAN_EGRESS_MODE_REAL_KEEP: the VLAN tag format of egressed
+ * packets will remain the same as their ingressed format, and neither the
+ * priority nor VID fields can be altered
+ */
+enum rtl8365mb_vlan_egress_mode {
+	RTL8365MB_VLAN_EGRESS_MODE_ORIGINAL = 0,
+	RTL8365MB_VLAN_EGRESS_MODE_KEEP = 1,
+	RTL8365MB_VLAN_EGRESS_MODE_PRI_TAG = 2,
+	RTL8365MB_VLAN_EGRESS_MODE_REAL_KEEP = 3,
+};
+
 /* VLAN control register */
 #define RTL8365MB_VLAN_CTRL_REG			0x07A8
 #define   RTL8365MB_VLAN_CTRL_EN_MASK		0x0001
+
+/* VLAN ingress filter register */
+#define RTL8365MB_VLAN_INGRESS_REG				0x07A9
+#define   RTL8365MB_VLAN_INGRESS_FILTER_PORT_EN_OFFSET(_p)	(_p)
+#define   RTL8365MB_VLAN_INGRESS_FILTER_PORT_EN_MASK(_p)	BIT(_p)
+
+/* VLAN "transparent" setting registers */
+#define RTL8365MB_VLAN_EGRESS_TRANSPARENT_REG_BASE	0x09D0
+#define RTL8365MB_VLAN_EGRESS_TRANSPARENT_REG(_p) \
+		(RTL8365MB_VLAN_EGRESS_TRANSPARENT_REG_BASE + (_p))
+
+/* VLAN egress "keep" port mask registers */
+#define RTL8365MB_VLAN_EGRESS_KEEP_REG_BASE	0x093B
+#define RTL8365MB_VLAN_EGRESS_KEEP_REG(_p) \
+		(RTL8365MB_VLAN_EGRESS_KEEP_REG_BASE + ((_p) >> 1))
+#define RTL8365MB_VLAN_EGRESS_KEEP_OFFSET(_p)	(((_p) & 1) * 8)
+#define RTL8365MB_VLAN_EGRESS_KEEP_MASK		0x00FF
+
+#define RTL8365MB_VLAN_EGRESS_KEEP_EXT_REG_BASE		0x08D8
+#define RTL8365MB_VLAN_EGRESS_KEEP_EXT_REG(_p) \
+		(RTL8365MB_VLAN_EGRESS_KEEP_EXT_REG_BASE + ((_p) >> 1))
+#define   RTL8365MB_VLAN_EGRESS_KEEP_EXT_OFFSET(_p)	(((_p) & 1) * 3)
+#define   RTL8365MB_VLAN_EGRESS_KEEP_EXT_MASK		0x0007
 
 /* MIB counter value registers */
 #define RTL8365MB_MIB_COUNTER_BASE	0x1000
@@ -672,6 +736,7 @@ struct rtl8365mb_port {
  * @cpu: CPU tagging and CPU port configuration for this chip
  * @vlanmc_db: VLAN membership configuration database
  * @vlanmc_null: reserved VLAN membership config entry for disabling PVID
+ * @vlanmc_unaware: reserved VLAN membership config entry for VLAN-unaware mode
  * @vlanmc_synced: VLAN membership configs that should be synced with
  *                 the VLAN4k table
  * @mib_lock: prevent concurrent reads of MIB counters
@@ -688,6 +753,7 @@ struct rtl8365mb {
 	struct rtl8365mb_cpu cpu;
 	struct rtl8365mb_vlanmc_db vlanmc_db;
 	struct rtl8365mb_vlanmc_entry *vlanmc_null;
+	struct rtl8365mb_vlanmc_entry *vlanmc_unaware;
 	struct list_head vlanmc_synced;
 	struct mutex mib_lock;
 	struct mutex l2_lock;
@@ -1258,6 +1324,150 @@ static void rtl8365mb_port_fast_age(struct dsa_switch *ds, int port)
 			ret);
 }
 
+static int rtl8365mb_port_set_transparent(struct realtek_priv *priv, int egr_port,
+					  int igr_port, bool enable)
+{
+	/* "Transparent" between the two ports means that packets forwarded by
+	 * igr_port and egressed on egr_port will not be filtered by the usual
+	 * VLAN membership settings.
+	 */
+	return regmap_update_bits(
+		priv->map, RTL8365MB_VLAN_EGRESS_TRANSPARENT_REG(egr_port),
+		BIT(igr_port), enable ? BIT(igr_port) : 0);
+}
+
+static int rtl8365mb_port_set_egress_keep(struct realtek_priv *priv,
+					  int egr_port, int igr_port,
+					  bool enable)
+{
+	u32 mask;
+	u32 reg;
+
+	if (igr_port < 8) {
+		reg = RTL8365MB_VLAN_EGRESS_KEEP_REG(egr_port);
+		mask = BIT(igr_port)
+		       << RTL8365MB_VLAN_EGRESS_KEEP_OFFSET(egr_port);
+	} else {
+		reg = RTL8365MB_VLAN_EGRESS_KEEP_EXT_REG(egr_port);
+		mask = (BIT(igr_port) >> 8)
+		       << RTL8365MB_VLAN_EGRESS_KEEP_EXT_OFFSET(egr_port);
+	}
+
+	/* Egress "keep" enabled: Packets forwarded by igr_port and egressed on
+	 * egr_port will not be subject to the normal egress tagging/untagging
+	 * rules of the VLAN configuration. That is to say, the packet will be
+	 * egressed on egr_port exactly as it was received on igr_port.
+	 *
+	 * Egress "keep" disabled: Packets will be subject to the usual egress
+	 * tagging rules of the VLAN configuration. E.g. "egress untagged", etc.
+	 */
+	return regmap_update_bits(priv->map, reg, mask, enable ? mask : 0);
+}
+
+static int rtl8365mb_port_set_ingress_filtering(struct realtek_priv *priv,
+						int port, bool enable)
+{
+	/* Ingress filtering enabled: Discard VLAN-tagged frames if the port is
+	 * not a member of the VLAN with which the packet is associated.
+	 * Untagged packets will also be discarded unless the port has a PVID
+	 * programmed. Priority-tagged frames are treated as untagged frames.
+	 *
+	 * Ingress filtering disabled: Accept all tagged and untagged frames.
+	 */
+	return regmap_update_bits(
+		priv->map, RTL8365MB_VLAN_INGRESS_REG,
+		RTL8365MB_VLAN_INGRESS_FILTER_PORT_EN_MASK(port),
+		(enable ? 1 : 0)
+			<< RTL8365MB_VLAN_INGRESS_FILTER_PORT_EN_OFFSET(port));
+}
+
+static int rtl8365mb_port_vlan_filtering(struct dsa_switch *ds, int port,
+					 bool vlan_filtering,
+					 struct netlink_ext_ack *extack)
+{
+	struct realtek_priv *priv = ds->priv;
+	struct dsa_port *dp;
+	int ret;
+
+	// DISABLE
+	// add this port to the transparent port mask of all ports
+	// -> egress filtering will be disabled for all packets forwarded from this port
+	// add this port to the keep port mask of all ports
+	// -> disables tag/untag logic for all packets forwarded from this port
+	// add ACL rule to classify all packets according to MC 1
+	// -> MC1 has VID=0 and member=all
+	// the port isolation mask should take care of the rest
+
+	// ENABLE
+	// remove this port from the transparent port mask of all ports
+	// -> egress filtering will be enabled for all packets forwarded from this port
+	// remove this port from the keep port mask of all ports
+	// -> enables tag/untag logic for all packets forwarded from this port
+	// remove ACL rule to classify all packets according to MC 1
+	// -> port will classify packets according to its PVID and frame tag
+
+	// TODO: should we only enable keep/transparent for egress ports in the
+	// same bridge? or does it not matter, due to port isolation?
+	if (vlan_filtering) {
+		/* Rely on the membership and tagging rules of the VLAN
+		 * configuration already programmed into the switch.
+		 */
+		dsa_switch_for_each_available_port(dp, ds) {
+			ret = rtl8365mb_port_set_transparent(priv, dp->index,
+							     port, false);
+			if (ret)
+				return ret;
+
+			ret = rtl8365mb_port_set_egress_keep(priv, dp->index,
+							     port, false);
+			if (ret)
+				return ret;
+		}
+
+		/* Remove port from VLAN-unaware ACL rule by disabling ACL on
+		 * this port - this means we don't have to reconfigure the ACL
+		 * rule list, which is not a very atomic operation.
+		 */
+		ret = rtl8365mb_acl_set_port_enable(priv, dp->index, false);
+		if (ret)
+			return ret;
+
+		/* Filter ingress packets according to VLAN membership */
+		ret = rtl8365mb_port_set_ingress_filtering(priv, port, true);
+		if (ret)
+			return ret;
+	} else {
+		/* Let packets pass freely from this port to all other ports
+		 * unmodified (respecting port isolation settings).
+		 */
+		dsa_switch_for_each_available_port(dp, ds) {
+			ret = rtl8365mb_port_set_transparent(priv, dp->index,
+							     port, true);
+			if (ret)
+				return ret;
+
+			ret = rtl8365mb_port_set_egress_keep(priv, dp->index,
+							     port, true);
+			if (ret)
+				return ret;
+		}
+
+		/* Re-enable ACL on this port to make it classify incoming
+		 * packets as untagged and hence learn with VID 0.
+		 */
+		ret = rtl8365mb_acl_set_port_enable(priv, dp->index, true);
+		if (ret)
+			return ret;
+
+		/* Don't filter incoming packets, i.e. ignore VLAN membership */
+		ret = rtl8365mb_port_set_ingress_filtering(priv, port, false);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
 static struct rtl8365mb_vlanmc_entry *
 rtl8365mb_find_synced_vlanmc(struct realtek_priv *priv, u16 vid)
 {
@@ -1490,9 +1700,42 @@ static int rtl8365mb_port_vlan_del(struct dsa_switch *ds, int port,
 	return 0;
 }
 
+static int
+rtl8365mb_port_set_vlan_egress_mode(struct realtek_priv *priv, int port,
+				    enum rtl8365mb_vlan_egress_mode mode)
+{
+	return regmap_update_bits(
+		priv->map, RTL8365MB_PORT_MISC_CFG_REG(port),
+		RTL8365MB_PORT_MISC_CFG_VLAN_EGRESS_MODE_MASK,
+		FIELD_PREP(RTL8365MB_PORT_MISC_CFG_VLAN_EGRESS_MODE_MASK,
+			   mode));
+}
+
 static int rtl8365mb_vlan_setup(struct realtek_priv *priv)
 {
+	struct dsa_switch *ds = &priv->ds;
 	struct rtl8365mb *mb = priv->chip_data;
+	struct rtl8365mb_acl_rule rule = {
+		.enabled = 1,
+		.negate = 0,
+		.template = 0,
+		.care = {
+			.portmask = RTL8365MB_PORTMASK,
+			.fields = { /* don't care about any field bits */ },
+		},
+		.data = {
+			.portmask = RTL8365MB_PORTMASK,
+			.fields = { /* ignored since care bits are all 0 */ },
+		},
+	};
+	struct rtl8365mb_acl_action action = {
+		.mode = RTL8365MB_ACL_ACTION_MODE_CVLAN,
+		.cvlan = {
+			.subaction = RTL8365MB_ACL_CVLAN_SUBACTION_INGRESS,
+			.mcidx = 1, /* cf. vlanmc_unaware below */
+		},
+	};
+	struct dsa_port *dp;
 	int ret;
 
 	INIT_LIST_HEAD(&mb->vlanmc_synced);
@@ -1515,17 +1758,107 @@ static int rtl8365mb_vlan_setup(struct realtek_priv *priv)
 	if (ret)
 		goto out_free_vlanmc_null;
 
+
+	/* Initialize the reserved "unaware" VLAN membership config. This is
+	 * used by the ACL action defined above in order to reclassify packets
+	 * according to this VLAN membership config. Specifically the VID is 0
+	 * and hence the rule will force all ingressed packets to be learned as
+	 * though the port were VLAN-unaware.
+	 *
+	 * TODO TODO check whether the next paragraph is true, or if the
+	 * transparent setting supercedes it
+	 *
+	 * As for the membership, in this case all ports are added so that when
+	 * a packet is classified according to this VLAN, all ports are a priori
+	 * part of the forwarding mask. Of course, the port isolation settings
+	 * take precedence over this.
+	 */
+	mb->vlanmc_unaware = rtl8365mb_vlan_alloc_vlanmc_entry(&mb->vlanmc_db);
+	if (IS_ERR(mb->vlanmc_unaware)) {
+		ret = PTR_ERR(mb->vlanmc_null);
+		goto out_free_vlanmc_null;
+	}
+
+	/* Likewise the rule above assumes that vlanmc_unaware has mcidx 1 */
+	WARN_ON(mb->vlanmc_unaware->index != 1);
+
+	mb->vlanmc_unaware->vlanmc.member = RTL8365MB_PORTMASK; // TODO maybe not needed, since we use transparent setting to ignore VLAN egress filter
+
+	ret = rtl8365mb_vlan_set_vlanmc_entry(priv, mb->vlanmc_unaware);
+	if (ret)
+		goto out_free_vlanmc_unaware;
+
+	/* Set up our ACL for VLAN-unaware mode */
+	ret = rtl8365mb_acl_reset(priv);
+	if (ret)
+		goto out_free_vlanmc_unaware;
+
+	ret = rtl8365mb_acl_set_template_config(
+		priv, &rtl8365mb_acl_default_template_config);
+	if (ret)
+		goto out_free_vlanmc_unaware;
+
+	ret = rtl8365mb_acl_set_fieldsel_config(
+		priv, &rtl8365mb_acl_default_fieldsel_config);
+	if (ret)
+		goto out_free_vlanmc_unaware;
+
+	ret = rtl8365mb_acl_set_action(priv, 0, &action);
+	if (ret)
+		goto out_free_vlanmc_unaware;
+
+	ret = rtl8365mb_acl_set_rule(priv, 0, &rule);
+	if (ret)
+		goto out_free_vlanmc_unaware;
+
+	/* ACL is now set up. Enable it by default on all ports. It will get
+	 * disabled when VLAN filtering is enabled and vice versa.
+	 */
+	dsa_switch_for_each_available_port(dp, ds) {
+		/* TODO explain why we set ORIGINAL */
+		ret = rtl8365mb_port_set_vlan_egress_mode(
+			priv, dp->index, RTL8365MB_VLAN_EGRESS_MODE_ORIGINAL);
+		if (ret)
+			return ret;
+
+		ret = rtl8365mb_acl_set_port_enable(priv, dp->index, true);
+		if (ret)
+			goto out_free_vlanmc_unaware;
+	}
+
+	/* Add all ports to VLAN0. Not sure if needed. But at least for
+	 * learning, we need to set the ivl_en bit to 1 so that the switch
+	 * learns with {VID, MAC, EFID} rather than {FID, MAC, EFID}.
+	 */
+	// TODO find right place for this
+	{
+		struct rtl8365mb_vlan4k vlan4k = { 0 };
+		ret = rtl8365mb_vlan_get_vlan4k(priv, 0, &vlan4k);
+		if (ret)
+			return ret;
+		vlan4k.member |= RTL8365MB_PORTMASK;
+		vlan4k.ivl_en = true;
+		ret = rtl8365mb_vlan_set_vlan4k(priv, &vlan4k);
+		if (ret)
+			return ret;
+	}
+
 	/* Enable VLAN functionality on the switch */
 	ret = regmap_update_bits(priv->map, RTL8365MB_VLAN_CTRL_REG,
 				 RTL8365MB_VLAN_CTRL_EN_MASK,
 				 FIELD_PREP(RTL8365MB_VLAN_CTRL_EN_MASK, 1));
 	if (ret)
-		goto out_free_vlanmc_null;
+		goto out_free_vlanmc_unaware;
 
 	return 0;
 
+out_free_vlanmc_unaware:
+	rtl8365mb_vlan_free_vlanmc_entry(mb->vlanmc_unaware);
+	mb->vlanmc_unaware = NULL;
+	
 out_free_vlanmc_null:
 	rtl8365mb_vlan_free_vlanmc_entry(mb->vlanmc_null);
+	mb->vlanmc_null = NULL;
 
 	return ret;
 }
@@ -1546,6 +1879,9 @@ static void rtl8365mb_vlan_teardown(struct realtek_priv *priv)
 			p->pvid = 0;
 		}
 	}
+
+	rtl8365mb_vlan_free_vlanmc_entry(mb->vlanmc_unaware);
+	mb->vlanmc_unaware = NULL;
 
 	rtl8365mb_vlan_free_vlanmc_entry(mb->vlanmc_null);
 	mb->vlanmc_null = NULL;
@@ -1669,7 +2005,7 @@ static int rtl8365mb_port_mdb_add(struct dsa_switch *ds, int port,
 	if (db.type != DSA_DB_PORT && db.type != DSA_DB_BRIDGE)
 		return -EOPNOTSUPP;
 
-	memcpy(mc.key.mac_addr, &mdb->addr, ETH_ALEN);
+	memcpy(key.mac_addr, &mdb->addr, ETH_ALEN);
 
 	mutex_lock(&mb->l2_lock);
 
@@ -2898,6 +3234,7 @@ static const struct dsa_switch_ops rtl8365mb_switch_ops = {
 	.port_bridge_flags = rtl8365mb_port_bridge_flags,
 	.port_stp_state_set = rtl8365mb_port_stp_state_set,
 	.port_fast_age = rtl8365mb_port_fast_age,
+	.port_vlan_filtering = rtl8365mb_port_vlan_filtering,
 	.port_vlan_add = rtl8365mb_port_vlan_add,
 	.port_vlan_del = rtl8365mb_port_vlan_del,
 	.port_fdb_add = rtl8365mb_port_fdb_add,

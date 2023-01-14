@@ -196,6 +196,16 @@ void rtl8365mb_vlan_free_vlanmc_entry(
 	struct rtl8365mb_vlanmc_entry *vlanmc_entry);
 
 /**
+ * rtl8365mb_vlan_get_vlanmc_entry - get a VLAN membership config by index
+ * @index: the VLAN membership config index to get
+ * @vlanmc_entry: VLAN membership config is output here
+ *
+ * Intended for debug purposes only.
+ */
+int rtl8365mb_vlan_get_vlanmc(struct realtek_priv *priv, u32 index,
+			      struct rtl8365mb_vlanmc *vlanmc);
+
+/**
  * rtl8365mb_vlan_set_vlanmc_entry - set a VLAN membership config entry
  * @vlanmc_entry: the VLAN membership config to set
  *

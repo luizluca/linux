@@ -125,6 +125,37 @@ int rtl8365mb_vlan_set_vlan4k(struct realtek_priv *priv,
 				     data, ARRAY_SIZE(data));
 }
 
+int rtl8365mb_vlan_get_vlanmc(struct realtek_priv *priv, u32 index,
+			      struct rtl8365mb_vlanmc *vlanmc)
+{
+	u16 data[4] = { 0 };
+	int val;
+	int ret;
+	int i;
+
+	for (i = 0; i < 4; i++) {
+		ret = regmap_read(priv->map, RTL8365MB_VLAN_MC_REG(index) + i,
+				  &val);
+		if (ret)
+			return ret;
+
+		data[i] = val;
+	}
+
+	vlanmc->member = FIELD_GET(RTL8365MB_VLAN_MC_D0_MBR_MASK, data[0]);
+	vlanmc->fid = FIELD_GET(RTL8365MB_VLAN_MC_D1_FID_MASK, data[1]);
+	vlanmc->meteridx =
+		FIELD_GET(RTL8365MB_VLAN_MC_D2_METERIDX_MASK, data[2]);
+	vlanmc->policing_en =
+		FIELD_GET(RTL8365MB_VLAN_MC_D2_ENVLANPOL_MASK, data[2]);
+	vlanmc->priority = FIELD_GET(RTL8365MB_VLAN_MC_D2_VBPRI_MASK, data[2]);
+	vlanmc->priority_en =
+		FIELD_GET(RTL8365MB_VLAN_MC_D2_VBPEN_MASK, data[2]);
+	vlanmc->evid = FIELD_GET(RTL8365MB_VLAN_MC_D3_EVID_MASK, data[3]);
+
+	return 0;
+}
+
 /* Private - use rtl8365mb_vlan_set_vlanmc_entry() */
 static int rtl8365mb_vlan_set_vlanmc(struct realtek_priv *priv, u32 index,
 				     const struct rtl8365mb_vlanmc *vlanmc)
