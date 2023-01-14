@@ -1,0 +1,16 @@
+STATS/MIB counters
+==================
+
+- rtl8365mb_mib_counter_read(): remove mib_lock and use regmap_nolock w/ mutex
+  held instead; ditto in mib setup. remember mib counter reading is also table
+  access, per what Kobe Wu told me, so it might interfere with other table
+  lookup.
+- consider moving mib stuff to separate file
+
+FDB/MDB
+=======
+
+- add an API to look up by address
+- make (de)serialization APIs public too
+- investigate why sometimes fdb_add succeeds, but next_uc doesn't return it (seems related to VID=0 EFID=0)
+
