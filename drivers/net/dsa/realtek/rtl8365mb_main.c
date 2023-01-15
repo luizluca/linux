@@ -107,6 +107,7 @@
 #include "rtl8365mb_acl.h"
 #include "rtl8365mb_l2.h"
 #include "rtl8365mb_vlan.h"
+#include "rtl8365mb_debugfs.h"
 
 /* Family-specific data and limits */
 #define RTL8365MB_PHYADDRMAX		7
@@ -2655,6 +2656,20 @@ static void rtl8365mb_stats_teardown(struct realtek_priv *priv)
 	}
 }
 
+static void rtl8365mb_debugfs_setup(struct realtek_priv *priv)
+{
+	struct rtl8365mb *mb = priv->chip_data;
+
+	mb->debugfs_dir = rtl8365mb_debugfs_create(priv);
+}
+
+static void rtl8365mb_debugfs_teardown(struct realtek_priv *priv)
+{
+	struct rtl8365mb *mb = priv->chip_data;
+
+	rtl8365mb_debugfs_remove(mb->debugfs_dir);
+}
+
 static int rtl8365mb_get_and_clear_status_reg(struct realtek_priv *priv, u32 reg,
 					      u32 *val)
 {
@@ -3128,6 +3143,8 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 	/* Start statistics counter polling */
 	rtl8365mb_stats_setup(priv);
 
+	rtl8365mb_debugfs_setup(priv);
+
 	mutex_init(&mb->l2_lock);
 
 	return 0;
@@ -3146,6 +3163,7 @@ static void rtl8365mb_teardown(struct dsa_switch *ds)
 {
 	struct realtek_priv *priv = ds->priv;
 
+	rtl8365mb_debugfs_teardown(priv);
 	rtl8365mb_stats_teardown(priv);
 	rtl8365mb_vlan_teardown(priv);
 	rtl8365mb_irq_teardown(priv);

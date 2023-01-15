@@ -18,3 +18,4 @@ rtl8365mb-objs := rtl8365mb_main.o \
 		  rtl8365mb_acl.o \
 		  rtl8365mb_vlan.o \
 		  rtl8365mb_l2.o \
+		  rtl8365mb_debugfs.o \
