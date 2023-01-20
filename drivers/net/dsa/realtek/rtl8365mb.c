@@ -1903,6 +1903,34 @@ static int rtl8365mb_port_set_isolation(struct realtek_priv *priv, int port,
 	return regmap_write(priv->map, RTL8365MB_PORT_ISOLATION_REG(port), mask);
 }
 
+#define RTL8365MB_EEE_OCP_PHY_ADDR	(0xA5D0)
+#define   RTL8365MB_EEE_100M		GENMASK(1, 1)
+#define   RTL8365MB_EEE_GIGA		GENMASK(2, 2)
+
+static int rtl8365mb_get_mac_eee(struct dsa_switch *ds, int port, struct ethtool_eee *e)
+{
+	struct realtek_priv *priv = ds->priv;
+	int reg;
+
+	if (!dsa_is_user_port(ds, port))
+		return -EOPNOTSUPP;
+
+	reg = rtl8365mb_dsa_phy_read(ds, port, RTL8365MB_EEE_OCP_PHY_ADDR);
+	dev_err(priv->dev,
+		"RTL8365MB_EEE_OCP_PHY_ADDR port %d: %x\n", port, reg);
+
+	e->eee_enabled = reg & (RTL8365MB_EEE_100M | RTL8365MB_EEE_GIGA);
+	//e->eee_active = !!(reg & BIT(port));
+	return 0;
+
+	//return -EOPNOTSUPP;
+}
+
+static int rtl8365mb_set_mac_eee(struct dsa_switch *ds, int port, struct ethtool_eee *e)
+{
+	return -EOPNOTSUPP;
+}
+
 static int rtl8365mb_mib_counter_read(struct realtek_priv *priv, int port,
 				      u32 offset, u32 length, u64 *mibvalue)
 {
@@ -2880,6 +2908,10 @@ static const struct dsa_switch_ops rtl8365mb_switch_ops_mdio = {
 	.port_bridge_leave = rtl8365mb_port_bridge_leave,
 	.port_bridge_flags = rtl8365mb_port_bridge_flags,
 	.port_pre_bridge_flags = rtl8365mb_port_pre_bridge_flags,
+
+	//.port_fast_age = rtl8365mb_port_fast_age,
+	.get_mac_eee = rtl8365mb_get_mac_eee,
+	.set_mac_eee = rtl8365mb_set_mac_eee,
 };
 
 static const struct realtek_ops rtl8365mb_ops = {
