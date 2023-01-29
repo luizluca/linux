@@ -333,11 +333,16 @@ int rtl8365mb_acl_set_rule(struct realtek_priv *priv, int ruleidx,
 	care_data[9] = FIELD_PREP(RTL8365MB_ACL_RULE_ENTRY_D9_PORTMASK_EXT_MASK,
 				  rule->care.portmask >> 8) |
 		       FIELD_PREP(RTL8365MB_ACL_RULE_ENTRY_D9_VALID_MASK,
-				  rule->enabled);
-	data_data[9] = FIELD_PREP(RTL8365MB_ACL_RULE_ENTRY_D9_PORTMASK_EXT_MASK,
-				  rule->data.portmask >> 8) |
+				  rule->enabled); // TODO remove this enabled?
+
+	// experiment
+	care_data[9] = FIELD_PREP(RTL8365MB_ACL_RULE_ENTRY_D9_PORTMASK_EXT_MASK,
+				  rule->care.portmask >> 8) |
 		       FIELD_PREP(RTL8365MB_ACL_RULE_ENTRY_D9_VALID_MASK,
-				  rule->enabled);
+				  0); // TODO remove this enabled?
+
+	data_data[9] = FIELD_PREP(RTL8365MB_ACL_RULE_ENTRY_D9_PORTMASK_EXT_MASK,
+				  rule->data.portmask >> 8);
 
 	/* Some bit twiddling which is apparently necessary before committing */
 	for (i = 0; i < 10; i++) {
@@ -351,6 +356,10 @@ int rtl8365mb_acl_set_rule(struct realtek_priv *priv, int ruleidx,
 			 "XXX-care_data[%d] = 0x%04x\n",
 			 i, data_data[i], i, care_data[i]);
 	}
+
+	/* This comes after as it mustn't get clobbered */
+	data_data[9] |= FIELD_PREP(RTL8365MB_ACL_RULE_ENTRY_D9_VALID_MASK,
+				   rule->enabled);
 
 	/* Now write the entries, starting with the care entry. The data entry
 	 * holds the valid (i.e. enable) bit, hence we should commit it last.

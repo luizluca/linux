@@ -131,13 +131,21 @@ int rtl8365mb_table_query(struct realtek_priv *priv,
 
 	/* Write entry data if writing to the table */
 	if (query->op == RTL8365MB_TABLE_OP_WRITE) {
+	  if (query->table == RTL8365MB_TABLE_ACL_RULE || query->table ==RTL8365MB_TABLE_ACL_ACTION) {
+	    dev_info(priv->dev, "ZZZ ---- table=%d\n", query->table);
+	  }
 		for (i = 0; i < size; i++) {
 			ret = regmap_write(priv->map_nolock,
 					   RTL8365MB_TABLE_WRITE_REG(i),
 					   data[i]);
 			if (ret)
 				goto out;
+	  if (query->table == RTL8365MB_TABLE_ACL_RULE || query->table ==RTL8365MB_TABLE_ACL_ACTION)
+		  dev_info(priv->dev, "%04x\n", data[i]);
 		}
+	  if (query->table == RTL8365MB_TABLE_ACL_RULE || query->table ==RTL8365MB_TABLE_ACL_ACTION) {
+	    dev_info(priv->dev, "ZZZ ---\n");
+	  }
 	}
 
 	/* Write address */

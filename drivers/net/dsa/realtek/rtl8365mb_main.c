@@ -1794,6 +1794,8 @@ static int rtl8365mb_vlan_setup(struct realtek_priv *priv)
 	if (ret)
 		goto out_free_vlanmc_unaware;
 
+	regmap_write(priv->map, 0x06d7, 0); // FIXME TODO: note that this should drop packets which don't match any acl rule
+
 	ret = rtl8365mb_acl_set_template_config(
 		priv, &rtl8365mb_acl_default_template_config);
 	if (ret)
