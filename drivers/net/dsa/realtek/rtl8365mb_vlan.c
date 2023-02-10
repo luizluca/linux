@@ -8,7 +8,7 @@
 #include "rtl8365mb_table.h"
 #include <linux/regmap.h>
 
-/* CVLAN (i.e. VLAN4k) table entry layout, u16[4] */
+/* CVLAN (i.e. VLAN4k) table entry layout */
 #define RTL8365MB_CVLAN_ENTRY_D0_MBR_MASK		0x00FF
 #define RTL8365MB_CVLAN_ENTRY_D0_UNTAG_MASK		0xFF00
 #define RTL8365MB_CVLAN_ENTRY_D1_FID_MASK		0x000F
@@ -21,7 +21,7 @@
 #define RTL8365MB_CVLAN_ENTRY_D2_UNTAG_EXT_MASK		0x0038
 #define RTL8365MB_CVLAN_ENTRY_D2_METERIDX_EXT_MASK	0x0040
 
-/* VLAN member configuration registers 0~31, u16[3] */
+/* VLAN member configuration registers 0~31 and layout */
 #define RTL8365MB_VLAN_MC_BASE			0x0728
 #define RTL8365MB_VLAN_MC_REG(_x)  \
 		(RTL8365MB_VLAN_MC_BASE + (_x) * 4)

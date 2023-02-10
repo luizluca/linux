@@ -338,8 +338,6 @@ int rtl8365mb_l2_add_uc(struct realtek_priv *priv,
 			return -ENOSPC;
 		else if (ret)
 			return ret;
-
-		dev_info(priv->dev, "XXX added addr=%d\n", query.arg.l2.addr);
 	}
 
 	return 0;

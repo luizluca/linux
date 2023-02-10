@@ -116,8 +116,7 @@ struct rtl8365mb_vlanmc {
  * struct rtl8365mb_vlanmc_entry - abstract VLAN membership config entry
  * @vlanmc_db: VLAN membership configuration database
  * @index: the index of this VLAN membership config within the database
- * @refcnt: optional refcounter - rtl8365mb_alloc_vlanmc_entry()
- *          initializes this to zero but users can make use of it
+ * @refcnt: refcounter enabling users to track usage
  * @list: optional list head for putting these objects in a list
  * @vlanmc: the VLAN membership config itself
  *
@@ -177,8 +176,6 @@ int rtl8365mb_vlan_set_vlan4k(struct realtek_priv *priv,
  * Note that it is NOT guaranteed that the corresponding in-switch membership
  * config is already zeroed-out. It is up to the user to program the switch
  * membership config accordingly via rtl8365mb_vlan_set_vlanmc_entry().
- *
- * The refcounter is initialized to zero because not all users need refcounting.
  *
  * Return:
  * * pointer to a new VLAN membership config entry - on success

@@ -11,20 +11,45 @@
 #include "rtl8365mb_acl.h"
 #include "rtl8365mb_l2.h"
 #include "rtl8365mb_vlan.h"
+#include "rtl8365mb_table.h"
 
 static u16 user_addr;
+static u16 table = 2;
+
+static int rtl8365mb_debugfs_table_show(struct seq_file *file, void *offset)
+{
+	struct realtek_priv *priv = dev_get_drvdata(file->private);
+	u16 data[10] = { 0 };
+	int ret;
+
+	ret = rtl8365mb_table_query(priv,
+				    &(struct rtl8365mb_table_query){
+					    .table = table,
+					    .op = RTL8365MB_TABLE_OP_READ,
+					    .arg.acl_action.addr = user_addr,
+				    },
+				    data, ARRAY_SIZE(data));
+	if (ret)
+		return ret;
+
+	seq_printf(file, "%04x %04x %04x %04x %04x %04x %04x %04x %04x %04x\n",
+		   data[0], data[1], data[2], data[3], data[4], data[5],
+		   data[6], data[7], data[8], data[9]);
+
+	return 0;
+}
 
 static int rtl8365mb_debugfs_acl_rules_show(struct seq_file *file, void *offset)
 {
 	struct realtek_priv *priv = dev_get_drvdata(file->private);
-	struct rtl8365mb_acl_rule rule = { 0 };
 	int ret;
 	int i;
 
 	seq_printf(file, "index\tenabled\tnegate\ttmpl\twhat\tportmsk\tfields\n");
 
-	/* for (i = 0; i < RTL8365MB_NUM_ACL_CONFIGS; i++) { */
-	for (i = 0; i < 5; i++) {
+	for (i = 0; i < RTL8365MB_NUM_ACL_CONFIGS; i++) {
+	/* for (i = 0; i < 5; i++) { */
+		struct rtl8365mb_acl_rule rule = { 0 };
 		ret = rtl8365mb_acl_get_rule(priv, i, &rule);
 		if (ret)
 			return ret;
@@ -264,6 +289,9 @@ struct dentry *rtl8365mb_debugfs_create(struct realtek_priv *priv)
 	struct dentry *dir = debugfs_create_dir(dev_name(priv->dev), NULL);
 
 	// TODO make a root dir
+	debugfs_create_devm_seqfile(priv->dev, "table", dir,
+				    rtl8365mb_debugfs_table_show);
+
 	debugfs_create_devm_seqfile(priv->dev, "acl_rules", dir,
 				    rtl8365mb_debugfs_acl_rules_show);
 

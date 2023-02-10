@@ -1429,7 +1429,7 @@ static int rtl8365mb_port_vlan_filtering(struct dsa_switch *ds, int port,
 		 * this port - this means we don't have to reconfigure the ACL
 		 * rule list, which is not a very atomic operation.
 		 */
-		ret = rtl8365mb_acl_set_port_enable(priv, dp->index, false);
+		ret = rtl8365mb_acl_set_port_enable(priv, port, false);
 		if (ret)
 			return ret;
 
@@ -1456,7 +1456,7 @@ static int rtl8365mb_port_vlan_filtering(struct dsa_switch *ds, int port,
 		/* Re-enable ACL on this port to make it classify incoming
 		 * packets as untagged and hence learn with VID 0.
 		 */
-		ret = rtl8365mb_acl_set_port_enable(priv, dp->index, true);
+		ret = rtl8365mb_acl_set_port_enable(priv, port, true);
 		if (ret)
 			return ret;
 
@@ -1794,7 +1794,7 @@ static int rtl8365mb_vlan_setup(struct realtek_priv *priv)
 	if (ret)
 		goto out_free_vlanmc_unaware;
 
-	regmap_write(priv->map, 0x06d7, 0); // FIXME TODO: note that this should drop packets which don't match any acl rule
+	/* regmap_write(priv->map, 0x06d7, 0); // FIXME TODO: note that this should drop packets which don't match any acl rule */
 
 	ret = rtl8365mb_acl_set_template_config(
 		priv, &rtl8365mb_acl_default_template_config);
@@ -2005,6 +2005,8 @@ static int rtl8365mb_port_mdb_add(struct dsa_switch *ds, int port,
 	int ret;
 	struct rtl8365mb *mb = priv->chip_data;
 
+	dev_err(priv->dev, "XXX mdb add\n");
+
 	if (db.type != DSA_DB_PORT && db.type != DSA_DB_BRIDGE)
 		return -EOPNOTSUPP;
 
@@ -2046,6 +2048,7 @@ static int rtl8365mb_port_mdb_del(struct dsa_switch *ds, int port,
 	int ret;
 	struct rtl8365mb *mb = priv->chip_data;
 
+	dev_err(priv->dev, "XXX mdb del\n");
 	if (db.type != DSA_DB_PORT && db.type != DSA_DB_BRIDGE)
 		return -EOPNOTSUPP;
 
@@ -2080,6 +2083,7 @@ static int rtl8365mb_port_mdb_del(struct dsa_switch *ds, int port,
 	ret = rtl8365mb_l2_add_mc(priv, &mc);
 	mutex_unlock(&mb->l2_lock);
 
+	dev_err(priv->dev, "XXX mdb del done\n");
 	return ret;
 }
 

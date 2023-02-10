@@ -14,3 +14,65 @@ FDB/MDB
 - make (de)serialization APIs public too
 - investigate why sometimes fdb_add succeeds, but next_uc doesn't return it (seems related to VID=0 EFID=0)
 
+
+8021q uppers
+============
+
+For VLAN-aware bridges it works OK to add an 8021q upper to the device, since
+VLAN egress filtering is enabled and DSA/switchdev doesn't allow an 8021q upper
+to share a VID with a port whose bridge also has that VID. Only downside is that
+it will still learn for the 8021q VLAN even though this is not very useful.
+
+For VLAN-unaware bridges we need to make sure that the frames ingressed on the
+port are not flooded into the bridge if they are tagged with the VID of the
+8021q upper. This is hard because of our ACL rule which automatically classifies
+all packets as VID0. Possible workarounds
+
+1.  - in port_prechangeupper, reject 8021q uppers if the port is offloading a bridge
+    - in port_bridge_join, reject the operation if an 8021q upper is already in place
+    - this will still allow multiple 8021q uppers
+    - how does it work if you bridge those 8021q uppers, will it invoke a bridge_join?
+
+For the above we can set an extack message in bridge_join or port_prechangeupper. BTW, the good reason for not rejecting a bridge master in port_prechangeupper is that we don't want to disallow bridging altogether, but rather just force the port to remain standalone. We can do that by returning -EOPNOTSUPP in port_bridge_join. See this code from dsa/slave.c:
+
+
+static int dsa_slave_changeupper(struct net_device *dev,
+				 struct netdev_notifier_changeupper_info *info)
+{
+	struct dsa_port *dp = dsa_slave_to_port(dev);
+	struct netlink_ext_ack *extack;
+	int err = NOTIFY_DONE;
+
+	if (!dsa_slave_dev_check(dev))
+		return err;
+
+	extack = netdev_notifier_info_to_extack(&info->info);
+
+	if (netif_is_bridge_master(info->upper_dev)) {
+		if (info->linking) {
+			err = dsa_port_bridge_join(dp, info->upper_dev, extack);
+			if (!err)
+				dsa_bridge_mtu_normalization(dp);
+			if (err == -EOPNOTSUPP) {
+				if (extack && !extack->_msg)
+					NL_SET_ERR_MSG_MOD(extack,
+							   "Offloading not supported");
+				/* LOOK HERE, it's not an error */
+				err = 0;
+			}
+			err = notifier_from_errno(err);
+		} else {
+			dsa_port_bridge_leave(dp, info->upper_dev);
+			err = NOTIFY_OK;
+		}
+
+
+2. install an additional ACL rule to handle packets tagged with the 8021q upper
+VID, but this is tricky because ACL shouldn't be modified on the fly I think
+
+
+swp0
+====
+
+
+Waht's going on with this port? Is it connected to swp1? swp1 has no carrier...

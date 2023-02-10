@@ -167,13 +167,6 @@ int rtl8365mb_acl_reset(struct realtek_priv *priv)
 	int ret;
 	int i;
 
-	/* Disable ACL for all ports */
-	ret = regmap_write(priv->map, RTL8365MB_ACL_ENABLE_REG, 0);
-
-	/* Permit frames unmatched by ACL filters */
-	ret = regmap_write(priv->map, RTL8365MB_ACL_UNMATCH_PERMIT,
-			   RTL8365MB_ACL_UNMATCH_PERMIT_MASK);
-
 	/* Set the ACL action mode bits to all 1's for all actions,
 	 * and the ACL rule negate bit to all 0's for all rules.
 	 */
@@ -193,6 +186,14 @@ int rtl8365mb_acl_reset(struct realtek_priv *priv)
 			   RTL8365MB_ACL_RESET_MASK);
 	if (ret)
 		return ret;
+
+	/* Disable ACL for all ports */
+	ret = regmap_write(priv->map, RTL8365MB_ACL_ENABLE_REG, 0);
+
+	/* Permit frames unmatched by ACL filters */
+	ret = regmap_write(priv->map, RTL8365MB_ACL_UNMATCH_PERMIT,
+			   RTL8365MB_ACL_UNMATCH_PERMIT_MASK);
+
 
 	return 0;
 }
@@ -250,6 +251,7 @@ int rtl8365mb_acl_set_fieldsel_config(
 int rtl8365mb_acl_set_port_enable(struct realtek_priv *priv, int port,
 				  bool enable)
 {
+  dev_err(priv->dev, "ACL enable %d port %d\n", enable, port);
 	return regmap_update_bits(priv->map, RTL8365MB_ACL_ENABLE_REG,
 				  BIT(port), enable << port);
 }
@@ -350,11 +352,6 @@ int rtl8365mb_acl_set_rule(struct realtek_priv *priv, int ruleidx,
 		data_tmp = care_data[i] & data_data[i];
 		data_data[i] = data_tmp;
 		care_data[i] = care_tmp;
-
-		dev_info(priv->dev,
-			 "XXX data_data[%d] = 0x%04x\n"
-			 "XXX-care_data[%d] = 0x%04x\n",
-			 i, data_data[i], i, care_data[i]);
 	}
 
 	/* This comes after as it mustn't get clobbered */
