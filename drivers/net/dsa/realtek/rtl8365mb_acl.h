@@ -437,6 +437,15 @@ int rtl8365mb_acl_set_action(struct realtek_priv *priv, int actidx,
 			     const struct rtl8365mb_acl_action *action);
 
 /**
+ * rtl8365mb_acl_get_action - get an ACL action
+ * @priv: driver context
+ * @actidx: the index of the ACL action table entry to set
+ * @action: ACL action description is output here
+ */
+int rtl8365mb_acl_get_action(struct realtek_priv *priv, int actidx,
+			     struct rtl8365mb_acl_action *action);
+
+/**
  * rtl8365mb_acl_set_rule - program an ACL rule
  * @priv: driver context
  * @ruleidx: the index of the ACL rule table entry to set

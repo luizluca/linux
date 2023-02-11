@@ -39,20 +39,85 @@ static int rtl8365mb_debugfs_table_show(struct seq_file *file, void *offset)
 	return 0;
 }
 
-static int rtl8365mb_debugfs_acl_rules_show(struct seq_file *file, void *offset)
+static int rtl8365mb_debugfs_acl_actions_show(struct seq_file *file,
+					      void *offset)
 {
 	struct realtek_priv *priv = dev_get_drvdata(file->private);
+	struct rtl8365mb_acl_action action = { 0 };
+	struct rtl8365mb_acl_rule rule = { 0 };
+	int cascade_count;
 	int ret;
 	int i;
 
-	seq_printf(file, "index\tenabled\tnegate\ttmpl\twhat\tportmsk\tfields\n");
+	seq_printf(file, "index\tmode\n");
 
 	for (i = 0; i < RTL8365MB_NUM_ACL_CONFIGS; i++) {
-	/* for (i = 0; i < 5; i++) { */
-		struct rtl8365mb_acl_rule rule = { 0 };
+		/* Fistly check if the rule is enabled, since the action is not
+		 * interesting if there is no corresponding rule.
+		 */
 		ret = rtl8365mb_acl_get_rule(priv, i, &rule);
 		if (ret)
 			return ret;
+
+		if (!rule->enabled)
+			continue;
+
+		/* Now get the action */
+		ret = rtl8365mb_acl_get_action(priv, i, &action);
+		if (ret)
+			return ret;
+
+		seq_printf("%d\t%04x\n", i, action->mode);
+
+		/* Empty mode means "cascade into previous action", but there is
+		 * a limit of up to 5 cascaded actions.
+		 */
+		if (!action->mode && cascade_count < 5) {
+			cascade_count++;
+			seq_printf("\tcascade\n");
+			continue;
+		} else {
+			cascade_count = 1;
+		}
+
+		if (action->mode & RTL8365MB_ACTION_MODE_CVLAN) {
+			const char *subaction_str;
+
+			switch (action->cvlan.subaction) {
+			case RTL8365MB_ACL_CVLAN_SUBACTION_INGRESS:
+				subaction_str = "ingress";
+				break;
+			case RTL8365MB_ACL_CVLAN_SUBACTION_EGRESS:
+				subaction_str = "egress";
+				break;
+			default:
+				subaction_str = "?";
+				break;
+			}
+
+			seq_printf(" \tCVLAN\tsubact %s mcidx %d\n",
+				   subaction_str, action->cvlan.mcidx);
+		}
+	}
+}
+
+static int rtl8365mb_debugfs_acl_rules_show(struct seq_file *file, void *offset)
+{
+	struct realtek_priv *priv = dev_get_drvdata(file->private);
+	struct rtl8365mb_acl_rule rule = { 0 };
+	int ret;
+	int i;
+
+	seq_printf(file,
+		   "index\tenabled\tnegate\ttmpl\twhat\tportmsk\tfields\n");
+
+	for (i = 0; i < RTL8365MB_NUM_ACL_CONFIGS; i++) {
+		ret = rtl8365mb_acl_get_rule(priv, i, &rule);
+		if (ret)
+			return ret;
+
+		if (!rule->enabled)
+			continue;
 
 		seq_printf(file, "%d\t%u\t%u\t%u\n", i, rule.enabled,
 			   rule.negate, rule.template);
@@ -102,7 +167,8 @@ static int rtl8365mb_debugfs_vlan_vlan4k_show(struct seq_file *file, void *offse
 	return 0;
 }
 
-static int rtl8365mb_debugfs_vlan_vlanmc_show(struct seq_file *file, void *offset)
+static int rtl8365mb_debugfs_vlan_vlanmc_show(struct seq_file *file,
+					      void *offset)
 {
 	struct realtek_priv *priv = dev_get_drvdata(file->private);
 	struct rtl8365mb_vlanmc vlanmc;
@@ -294,6 +360,9 @@ struct dentry *rtl8365mb_debugfs_create(struct realtek_priv *priv)
 
 	debugfs_create_devm_seqfile(priv->dev, "acl_rules", dir,
 				    rtl8365mb_debugfs_acl_rules_show);
+
+	debugfs_create_devm_seqfile(priv->dev, "acl_actions", dir,
+				    rtl8365mb_debugfs_acl_actions_show);
 
 	debugfs_create_devm_seqfile(priv->dev, "vlan_vlan4k", dir,
 				    rtl8365mb_debugfs_vlan_vlan4k_show);

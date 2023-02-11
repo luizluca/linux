@@ -134,6 +134,23 @@ static int rtl8365mb_acl_set_action_mode(struct realtek_priv *priv, int actidx,
 			<< RTL8365MB_ACL_ACTION_CTRL_OFFSET(actidx));
 }
 
+static int rtl8365mb_acl_get_action_mode(struct realtek_priv *priv, int actidx,
+					 u32 *mode)
+{
+	int val;
+	int ret;
+
+	ret = regmap_get(priv->map, RTL8365MB_ACL_ACTION_CTRL_REG(actidx),
+			 &val);
+	if (ret)
+		return ret;
+
+	*mode = FIELD_GET(RTL8365MB_ACL_ACTION_CTRL_MODE_MASK_BASE,
+			  val >> RTL8365MB_ACL_ACTION_CTRL_OFFSET(actidx));
+
+	return 0;
+}
+
 static int rtl8365mb_acl_set_rule_negate(struct realtek_priv *priv, int ruleidx,
 					 bool negate)
 {
@@ -251,7 +268,6 @@ int rtl8365mb_acl_set_fieldsel_config(
 int rtl8365mb_acl_set_port_enable(struct realtek_priv *priv, int port,
 				  bool enable)
 {
-  dev_err(priv->dev, "ACL enable %d port %d\n", enable, port);
 	return regmap_update_bits(priv->map, RTL8365MB_ACL_ENABLE_REG,
 				  BIT(port), enable << port);
 }
@@ -282,7 +298,34 @@ int rtl8365mb_acl_set_action(struct realtek_priv *priv, int actidx,
 	if (ret)
 		return ret;
 
+	action->cvlan.mcidx = FIELD_GET(
+		RTL8365MB_ACL_ACTION_ENTRY_D0_CVLAN_MCIDX_MASK, data[0]);
+	action->cvlan.subaction = FIELD_GET(
+		RTL8365MB_ACL_ACTION_ENTRY_D0_CVLAN_SUBACT_MASK, data[0]);
+	/* NOTE: Remainder data left unparased as it is currently unused */
+
 	return 0;
+}
+
+int rtl8365mb_acl_get_action(struct realtek_priv *priv, int actidx,
+			     struct rtl8365mb_acl_action *action)
+{
+	u16 data[4] = { 0 };
+	int ret;
+
+	ret = rtl8365mb_acl_get_action_mode(priv, actidx, &action->mode);
+	if (ret)
+		return ret;
+
+	ret = rtl8365mb_table_query(priv,
+				    &(struct rtl8365mb_table_query){
+					    .table = RTL8365MB_TABLE_ACL_ACTION,
+					    .op = RTL8365MB_TABLE_OP_READ,
+					    .arg.acl_action.addr = actidx,
+				    },
+				    data, ARRAY_SIZE(data));
+	if (ret)
+		return ret;
 }
 
 int rtl8365mb_acl_set_rule(struct realtek_priv *priv, int ruleidx,
