@@ -1003,7 +1003,7 @@ static int rtl8366rb_setup_leds(struct realtek_priv *priv)
 	struct dsa_port *dp;
 	int ret;
 
-	dsa_switch_for_each_port(dp, priv->ds) {
+	dsa_switch_for_each_port(dp, &priv->ds) {
 		if (!dp->dn)
 			continue;
 
