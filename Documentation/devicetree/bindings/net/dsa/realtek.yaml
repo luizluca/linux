@@ -118,21 +118,19 @@ then:
     required:
       - mdc-gpios
       - mdio-gpios
-      - mdio
 
   properties:
     mdc-gpios: false
     mdio-gpios: false
-    mdio: false
 
 else:
   required:
     - mdc-gpios
     - mdio-gpios
-    - mdio
 
 required:
   - compatible
+  - mdio
 
     #  - mdc-gpios
     #  - mdio-gpios
@@ -347,30 +345,34 @@ examples:
                     ports {
                             #address-cells = <1>;
                             #size-cells = <0>;
-
                             port@0 {
                                     reg = <0>;
                                     label = "lan4";
+                                    phy-handle = <&eth3phy0>;
                             };
 
                             port@1 {
                                     reg = <1>;
                                     label = "lan3";
+                                    phy-handle = <&eth3phy1>;
                             };
 
                             port@2 {
                                     reg = <2>;
                                     label = "lan2";
+                                    phy-handle = <&eth3phy2>;
                             };
 
                             port@3 {
                                     reg = <3>;
                                     label = "lan1";
+                                    phy-handle = <&eth3phy3>;
                             };
 
                             port@4 {
                                     reg = <4>;
                                     label = "wan";
+                                    phy-handle = <&eth3phy4>;
                             };
 
                             port@7 {
@@ -384,6 +386,32 @@ examples:
                                             speed = <1000>;
                                             full-duplex;
                                     };
+                            };
+                    };
+
+                    mdio {
+                            #address-cells = <1>;
+                            #size-cells = <0>;
+
+                            eth3phy0: ethernet-phy@0 {
+                                    reg = <0>;
+                                    interrupt-parent = <&switch_intc2>;
+                                    interrupts = <0>;
+                            };
+                            eth3phy1: ethernet-phy@1 {
+                                    reg = <1>;
+                                    interrupt-parent = <&switch_intc2>;
+                                    interrupts = <1>;
+                            };
+                            eth3phy2: ethernet-phy@2 {
+                                    reg = <2>;
+                                    interrupt-parent = <&switch_intc2>;
+                                    interrupts = <2>;
+                            };
+                            eth3phy3: ethernet-phy@3 {
+                                    reg = <3>;
+                                    interrupt-parent = <&switch_intc2>;
+                                    interrupts = <3>;
                             };
                     };
             };
