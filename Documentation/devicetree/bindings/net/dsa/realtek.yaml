@@ -108,6 +108,32 @@ properties:
       compatible:
         const: realtek,smi-mdio
 
+patternProperties:
+  '^(ethernet-)?ports$':
+    type: object
+    additionalProperties: true
+
+    patternProperties:
+      '^(ethernet-)?port@[0-6]$':
+        type: object
+        additionalProperties: true
+
+        properties:
+          leds:
+            description:
+              "LEDs associated with this port"
+
+            patternProperties:
+              '^led@[a-f0-9]+$':
+                type: object
+                additionalProperties: true
+
+                properties:
+                  reg:
+                    description:
+                      "reg indicates the LED group for this LED"
+                    enum: [0, 1, 2, 3]
+
 if:
   required:
     - reg
@@ -142,6 +168,7 @@ unevaluatedProperties: false
 examples:
   - |
     #include <dt-bindings/gpio/gpio.h>
+    #include <dt-bindings/leds/common.h>
     #include <dt-bindings/interrupt-controller/irq.h>
 
     platform {
@@ -188,6 +215,25 @@ examples:
                                     reg = <4>;
                                     label = "wan";
                                     phy-handle = <&phy4>;
+
+                                    leds {
+                                            #address-cells = <1>;
+                                            #size-cells = <0>;
+
+                                            led@0 {
+                                                    reg = <0>;
+                                                    color = <LED_COLOR_ID_GREEN>;
+                                                    function = LED_FUNCTION_WAN;
+                                                    default-state = "keep";
+                                            };
+
+                                            led@3 {
+                                                    reg = <3>;
+                                                    color = <LED_COLOR_ID_AMBER>;
+                                                    function = LED_FUNCTION_WAN;
+                                                    default-state = "keep";
+                                            };
+                                    };
                             };
                             port@5 {
                                     reg = <5>;
