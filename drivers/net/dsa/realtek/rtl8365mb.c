@@ -107,10 +107,17 @@
 
 /* Family-specific data and limits */
 #define RTL8365MB_PHYADDRMAX		7
+/* FIXME? */
+#define RTL8367R_PHYADDRMAX		8
 #define RTL8365MB_NUM_PHYREGS		32
 #define RTL8365MB_PHYREGMAX		(RTL8365MB_NUM_PHYREGS - 1)
 #define RTL8365MB_MAX_NUM_PORTS		11
+/* FIXME? */
+#define RTL8367R_MAX_NUM_PORTS		10
 #define RTL8365MB_MAX_NUM_EXTINTS	3
+/* FIXME? */
+#define RTL8367R_MAX_NUM_EXTINTS	2
+
 #define RTL8365MB_LEARN_LIMIT_MAX	2112
 
 /* Chip identification registers */
@@ -313,6 +320,47 @@
  * fetch atomically. Three seconds should be a good enough polling interval.
  */
 #define RTL8365MB_STATS_INTERVAL_JIFFIES	(3 * HZ)
+
+/* LED trigger event for each group */
+#define RTL8365MB_LED_CTRL_REG			0x1b03
+#define RTL8365MB_LED_CTRL_OFFSET(led_group)	\
+	(4 * (led_group))
+#define RTL8365MB_LED_CTRL_MASK(led_group)	\
+	(0xf << RTL8365MB_LED_CTRL_OFFSET(led_group))
+
+/* LED mode for each port in each group */
+/* MODEs ON and OFF have precedence over RTL8365MB_LED_CTRL_REG */
+#define RTL8365MB_LED_0_P0_P7_CTRL_REG		0x1b08
+#define RTL8365MB_LED_0_P8_P9_CTRL_REG		0x1b09
+#define RTL8365MB_LED_1_P0_P7_CTRL_REG		0x1b0a
+#define RTL8365MB_LED_1_P8_P9_CTRL_REG		0x1b0b
+#define RTL8365MB_LED_2_P0_P7_CTRL_REG		0x1b0c
+#define RTL8365MB_LED_2_P8_P9_CTRL_REG		0x1b0d
+
+#define RTL8365MB_LED_X_PX_CTRL_REG_BASE	RTL8365MB_LED_0_P0_P7_CTRL_REG
+#define RTL8365MB_LED_X_PX_CTRL_REG(led_group, port)	\
+	RTL8365MB_LED_X_PX_CTRL_REG_BASE + ((led_group)*2) + ((port)/8)
+
+enum rtl8366_led_mode {
+	RTL8365MB_LED_OFF		= 0x0,
+	RTL8365MB_LED_DUP_COL		= 0x1,
+	RTL8365MB_LED_LINK_ACT		= 0x2,
+	RTL8365MB_LED_SPD1000		= 0x3,
+	RTL8365MB_LED_SPD100		= 0x4,
+	RTL8365MB_LED_SPD10		= 0x5,
+	RTL8365MB_LED_SPD1000_ACT	= 0x6,
+	RTL8365MB_LED_SPD100_ACT	= 0x7,
+	RTL8365MB_LED_SPD10_ACT		= 0x8,
+	RTL8365MB_LED_SPD100_10_ACT	= 0x9,
+	RTL8365MB_LED_FIBER		= 0xa,
+	RTL8365MB_LED_AN_FAULT		= 0xb,
+	RTL8365MB_LED_LINK_RX		= 0xc,
+	RTL8365MB_LED_LINK_TX		= 0xd,
+	RTL8365MB_LED_MASTER		= 0xe,
+	RTL8365MB_LED_FORCE		= 0xf,
+
+	__RTL8365MB_LED_MAX
+};
 
 enum rtl8365mb_mib_counter_index {
 	RTL8365MB_MIB_ifInOctets,
@@ -557,6 +605,20 @@ static const struct rtl8365mb_chip_info rtl8365mb_chip_infos[] = {
 		.jam_table = rtl8365mb_init_jam_8365mb_vc,
 		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
 	},
+	{
+		.name = "RTL8367R",
+		.chip_id = 0x6088,
+		.chip_ver = 0x1000,
+		.extints = {
+			{ 8, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
+				PHY_INTF(RMII) | PHY_INTF(RGMII) },
+			{ 9, 0, PHY_INTF(MII) | PHY_INTF(TMII) |
+				PHY_INTF(RMII) | PHY_INTF(RGMII) },
+		},
+		.jam_table = rtl8365mb_init_jam_8365mb_vc,
+		//.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
+		.jam_size = 0,
+	},
 };
 
 enum rtl8365mb_stp_state {
@@ -693,6 +755,7 @@ static int rtl8365mb_phy_ocp_read(struct realtek_priv *priv, int phy,
 	int ret;
 
 	rtl83xx_lock(priv);
+
 
 	ret = rtl8365mb_phy_poll_busy(priv);
 	if (ret)
@@ -1927,7 +1990,8 @@ static int rtl8365mb_reset_chip(struct realtek_priv *priv)
 	/* Realtek documentation says the chip needs 1 second to reset. Sleep
 	 * for 100 ms before accessing any registers to prevent ACK timeouts.
 	 */
-	msleep(100);
+	// FIXME: make it variant parameter
+	msleep(1000);
 	return regmap_read_poll_timeout(priv->map, RTL8365MB_CHIP_RESET_REG, val,
 					!(val & RTL8365MB_CHIP_RESET_HW_MASK),
 					20000, 1e6);
@@ -1994,11 +2058,13 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 		if (ret)
 			goto out_teardown_irq;
 
+#if 0
 		/* Set the initial STP state of all ports to DISABLED, otherwise
 		 * ports will still forward frames to the CPU despite being
 		 * administratively down by default.
 		 */
 		rtl8365mb_port_stp_state_set(ds, i, BR_STATE_DISABLED);
+#endif
 
 		/* Set up per-port private data */
 		p->priv = priv;
@@ -2142,8 +2208,18 @@ const struct realtek_variant rtl8365mb_variant = {
 	.chip_data_sz = sizeof(struct rtl8365mb),
 };
 
+const struct realtek_variant rtl8367r_variant = {
+	.ds_ops = &rtl8365mb_switch_ops,
+	.ops = &rtl8365mb_ops,
+	.clk_delay = 1500,
+	.cmd_read = 0xb9,
+	.cmd_write = 0xb8,
+	.chip_data_sz = sizeof(struct rtl8365mb),
+};
+
 static const struct of_device_id rtl8365mb_of_match[] = {
 	{ .compatible = "realtek,rtl8365mb", .data = &rtl8365mb_variant, },
+	{ .compatible = "realtek,rtl8367r", .data = &rtl8367r_variant, },
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, rtl8365mb_of_match);
