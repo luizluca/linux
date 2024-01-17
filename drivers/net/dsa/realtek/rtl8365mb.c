@@ -107,10 +107,17 @@
 
 /* Family-specific data and limits */
 #define RTL8365MB_PHYADDRMAX		7
+/* FIXME? */
+#define RTL8367R_PHYADDRMAX		8
 #define RTL8365MB_NUM_PHYREGS		32
 #define RTL8365MB_PHYREGMAX		(RTL8365MB_NUM_PHYREGS - 1)
 #define RTL8365MB_MAX_NUM_PORTS		11
+/* FIXME? */
+#define RTL8367R_MAX_NUM_PORTS		10
 #define RTL8365MB_MAX_NUM_EXTINTS	3
+/* FIXME? */
+#define RTL8367R_MAX_NUM_EXTINTS	2
+
 #define RTL8365MB_LEARN_LIMIT_MAX	2112
 
 /* Chip identification registers */
@@ -708,6 +715,20 @@ static const struct rtl8365mb_chip_info rtl8365mb_chip_infos[] = {
 		.jam_table = rtl8365mb_init_jam_8365mb_vc,
 		.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
 	},
+	{
+		.name = "RTL8367R",
+		.chip_id = 0x6088,
+		.chip_ver = 0x1000,
+		.extints = {
+			{ 8, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
+				PHY_INTF(RMII) | PHY_INTF(RGMII) },
+			{ 9, 0, PHY_INTF(MII) | PHY_INTF(TMII) |
+				PHY_INTF(RMII) | PHY_INTF(RGMII) },
+		},
+		.jam_table = rtl8365mb_init_jam_8365mb_vc,
+		//.jam_size = ARRAY_SIZE(rtl8365mb_init_jam_8365mb_vc),
+		.jam_size = 0,
+	},
 };
 
 enum rtl8365mb_stp_state {
@@ -846,6 +867,7 @@ static int rtl8365mb_phy_ocp_read(struct realtek_priv *priv, int phy,
 	int ret;
 
 	rtl83xx_lock(priv);
+
 
 	ret = rtl8365mb_phy_poll_busy(priv);
 	if (ret)
@@ -2654,7 +2676,8 @@ static int rtl8365mb_reset_chip(struct realtek_priv *priv)
 	/* Realtek documentation says the chip needs 1 second to reset. Sleep
 	 * for 100 ms before accessing any registers to prevent ACK timeouts.
 	 */
-	msleep(100);
+	// FIXME: make it variant parameter
+	msleep(1000);
 	return regmap_read_poll_timeout(priv->map, RTL8365MB_CHIP_RESET_REG, val,
 					!(val & RTL8365MB_CHIP_RESET_HW_MASK),
 					20000, 1e6);
@@ -2728,11 +2751,13 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 		if (ret)
 			goto out_teardown_irq;
 
+#if 0
 		/* Set the initial STP state of all ports to DISABLED, otherwise
 		 * ports will still forward frames to the CPU despite being
 		 * administratively down by default.
 		 */
 		rtl8365mb_port_stp_state_set(ds, i, BR_STATE_DISABLED);
+#endif
 
 		/* Set up per-port private data */
 		p->priv = priv;
@@ -2897,8 +2922,18 @@ const struct realtek_variant rtl8365mb_variant = {
 	.chip_data_sz = sizeof(struct rtl8365mb),
 };
 
+const struct realtek_variant rtl8367r_variant = {
+	.ds_ops = &rtl8365mb_switch_ops,
+	.ops = &rtl8365mb_ops,
+	.clk_delay = 1500,
+	.cmd_read = 0xb9,
+	.cmd_write = 0xb8,
+	.chip_data_sz = sizeof(struct rtl8365mb),
+};
+
 static const struct of_device_id rtl8365mb_of_match[] = {
 	{ .compatible = "realtek,rtl8365mb", .data = &rtl8365mb_variant, },
+	{ .compatible = "realtek,rtl8367r", .data = &rtl8367r_variant, },
 	{ /* sentinel */ },
 };
 MODULE_DEVICE_TABLE(of, rtl8365mb_of_match);
