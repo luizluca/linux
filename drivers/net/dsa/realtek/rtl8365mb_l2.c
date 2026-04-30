@@ -7,7 +7,9 @@
 #include <linux/etherdevice.h>
 
 #include "rtl8365mb_l2.h"
+#include "rtl8365mb.h"
 #include "rtl8365mb_table.h"
+#include "rtl8365mb_reg.h"
 #include <linux/regmap.h>
 
 #define RTL8365MB_L2_ENTRY_SIZE			6
@@ -371,7 +373,7 @@ int rtl8365mb_l2_del_uc(struct realtek_priv *priv, int port,
 	return ret;
 }
 
-int rtl8365mb_l2_flush(struct realtek_priv *priv, int port, u16 vid)
+int rtl8365mb_l2_flush_c(struct realtek_priv *priv, int port, u16 vid)
 {
 	int mode = vid ? RTL8365MB_L2_FLUSH_CTRL2_MODE_PORT_VID :
 			 RTL8365MB_L2_FLUSH_CTRL2_MODE_PORT;
@@ -434,6 +436,16 @@ out:
 	mutex_unlock(&priv->map_lock);
 
 	return ret;
+}
+
+int rtl8365mb_l2_flush(struct realtek_priv *priv, int port, u16 vid)
+{
+	struct rtl8365mb *mb = priv->chip_data;
+
+	if (mb->chip_info->family->l2_flush)
+		return mb->chip_info->family->l2_flush(priv, port, vid);
+
+	return -EPROTONOSUPPORT;
 }
 
 int rtl8365mb_l2_add_mc(struct realtek_priv *priv, int port,

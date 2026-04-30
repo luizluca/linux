@@ -214,7 +214,7 @@ rtl83xx_probe(struct device *dev,
 		dev_dbg(dev, "asserted RESET\n");
 		msleep(REALTEK_HW_STOP_DELAY);
 		rtl83xx_reset_deassert(priv);
-		msleep(REALTEK_HW_START_DELAY);
+		msleep(var->reset_delay_ms);
 		dev_dbg(dev, "deasserted RESET\n");
 	}
 

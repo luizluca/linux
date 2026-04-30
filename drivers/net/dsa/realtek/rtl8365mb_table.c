@@ -5,6 +5,7 @@
  */
 
 #include "rtl8365mb_table.h"
+#include "rtl8365mb.h"
 #include <linux/regmap.h>
 
 /* Table access control register */
@@ -51,11 +52,11 @@ static int rtl8365mb_table_poll_busy(struct realtek_priv *priv)
 			10, 10000);
 }
 
-int rtl8365mb_table_query(struct realtek_priv *priv,
-			  enum rtl8365mb_table table,
-			  enum rtl8365mb_table_op op, u16 *addr,
-			  enum rtl8365mb_table_l2_method method,
-			  u16 port, u16 *data, size_t size)
+int rtl8365mb_table_query_c(struct realtek_priv *priv,
+			    enum rtl8365mb_table table,
+			    enum rtl8365mb_table_op op, u16 *addr,
+			    enum rtl8365mb_table_l2_method method,
+			    u16 port, u16 *data, size_t size)
 {
 	bool addr_as_input = true;
 	bool write_data = false;
@@ -211,4 +212,20 @@ out:
 	mutex_unlock(&priv->map_lock);
 
 	return ret;
+}
+
+int rtl8365mb_table_query(struct realtek_priv *priv,
+			  enum rtl8365mb_table table,
+			  enum rtl8365mb_table_op op, u16 *addr,
+			  enum rtl8365mb_table_l2_method method,
+			  u16 port, u16 *data, size_t size)
+{
+	struct rtl8365mb *mb = priv->chip_data;
+
+	if (mb->chip_info->family->table_query)
+		return mb->chip_info->family->table_query(priv, table, op, addr,
+							  method, port, data,
+							  size);
+
+	return -EPROTONOSUPPORT;
 }

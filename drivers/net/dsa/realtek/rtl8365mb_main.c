@@ -106,6 +106,7 @@
 #include "realtek-smi.h"
 #include "realtek-mdio.h"
 #include "rtl83xx.h"
+#include "rtl8365mb.h"
 #include "rtl8365mb_reg.h"
 #include "rtl8365mb_data.h"
 #include "rtl8365mb_l2.h"
@@ -115,13 +116,12 @@
 #define RTL8365MB_PHYADDRMAX		7
 #define RTL8365MB_NUM_PHYREGS		32
 #define RTL8365MB_PHYREGMAX		(RTL8365MB_NUM_PHYREGS - 1)
-#define RTL8365MB_MAX_NUM_PORTS		11
+
 /* Valid for the whole family except RTL8370B, which has 4160 entries.
  * RTL8370B is mentioned in vendor code but it might not even belong
  * to the same RTL8367C family.
  */
 #define RTL8365MB_LEARN_LIMIT_MAX	2112
-#define RTL8365MB_MAX_NUM_EXTINTS	3
 
 /* The LUT table size matches the maximum learning limit */
 #define RTL8365MB_L2_TABLE_SIZE		RTL8365MB_LEARN_LIMIT_MAX
@@ -141,78 +141,11 @@
 /* This value meaning is unknown */
 #define RTL8365MB_HSGMII_SCHED_VAL             7
 
-enum rtl8365mb_mib_counter_index {
-	RTL8365MB_MIB_ifInOctets,
-	RTL8365MB_MIB_dot3StatsFCSErrors,
-	RTL8365MB_MIB_dot3StatsSymbolErrors,
-	RTL8365MB_MIB_dot3InPauseFrames,
-	RTL8365MB_MIB_dot3ControlInUnknownOpcodes,
-	RTL8365MB_MIB_etherStatsFragments,
-	RTL8365MB_MIB_etherStatsJabbers,
-	RTL8365MB_MIB_ifInUcastPkts,
-	RTL8365MB_MIB_etherStatsDropEvents,
-	RTL8365MB_MIB_ifInMulticastPkts,
-	RTL8365MB_MIB_ifInBroadcastPkts,
-	RTL8365MB_MIB_inMldChecksumError,
-	RTL8365MB_MIB_inIgmpChecksumError,
-	RTL8365MB_MIB_inMldSpecificQuery,
-	RTL8365MB_MIB_inMldGeneralQuery,
-	RTL8365MB_MIB_inIgmpSpecificQuery,
-	RTL8365MB_MIB_inIgmpGeneralQuery,
-	RTL8365MB_MIB_inMldLeaves,
-	RTL8365MB_MIB_inIgmpLeaves,
-	RTL8365MB_MIB_etherStatsOctets,
-	RTL8365MB_MIB_etherStatsUnderSizePkts,
-	RTL8365MB_MIB_etherOversizeStats,
-	RTL8365MB_MIB_etherStatsPkts64Octets,
-	RTL8365MB_MIB_etherStatsPkts65to127Octets,
-	RTL8365MB_MIB_etherStatsPkts128to255Octets,
-	RTL8365MB_MIB_etherStatsPkts256to511Octets,
-	RTL8365MB_MIB_etherStatsPkts512to1023Octets,
-	RTL8365MB_MIB_etherStatsPkts1024to1518Octets,
-	RTL8365MB_MIB_ifOutOctets,
-	RTL8365MB_MIB_dot3StatsSingleCollisionFrames,
-	RTL8365MB_MIB_dot3StatsMultipleCollisionFrames,
-	RTL8365MB_MIB_dot3StatsDeferredTransmissions,
-	RTL8365MB_MIB_dot3StatsLateCollisions,
-	RTL8365MB_MIB_etherStatsCollisions,
-	RTL8365MB_MIB_dot3StatsExcessiveCollisions,
-	RTL8365MB_MIB_dot3OutPauseFrames,
-	RTL8365MB_MIB_ifOutDiscards,
-	RTL8365MB_MIB_dot1dTpPortInDiscards,
-	RTL8365MB_MIB_ifOutUcastPkts,
-	RTL8365MB_MIB_ifOutMulticastPkts,
-	RTL8365MB_MIB_ifOutBroadcastPkts,
-	RTL8365MB_MIB_outOampduPkts,
-	RTL8365MB_MIB_inOampduPkts,
-	RTL8365MB_MIB_inIgmpJoinsSuccess,
-	RTL8365MB_MIB_inIgmpJoinsFail,
-	RTL8365MB_MIB_inMldJoinsSuccess,
-	RTL8365MB_MIB_inMldJoinsFail,
-	RTL8365MB_MIB_inReportSuppressionDrop,
-	RTL8365MB_MIB_inLeaveSuppressionDrop,
-	RTL8365MB_MIB_outIgmpReports,
-	RTL8365MB_MIB_outIgmpLeaves,
-	RTL8365MB_MIB_outIgmpGeneralQuery,
-	RTL8365MB_MIB_outIgmpSpecificQuery,
-	RTL8365MB_MIB_outMldReports,
-	RTL8365MB_MIB_outMldLeaves,
-	RTL8365MB_MIB_outMldGeneralQuery,
-	RTL8365MB_MIB_outMldSpecificQuery,
-	RTL8365MB_MIB_inKnownMulticastPkts,
-	RTL8365MB_MIB_END,
-};
-
-struct rtl8365mb_mib_counter {
-	u32 offset;
-	u32 length;
-	const char *name;
-};
-
 #define RTL8365MB_MAKE_MIB_COUNTER(_offset, _length, _name) \
 		[RTL8365MB_MIB_ ## _name] = { _offset, _length, #_name }
 
-static struct rtl8365mb_mib_counter rtl8365mb_mib_counters[] = {
+/* Always keep rtl8365mb_mib_counter size as RTL8365MB_MIB_END */
+static const struct rtl8365mb_mib_counter rtl8365mb_mib_counters_c[RTL8365MB_MIB_END] = {
 	RTL8365MB_MAKE_MIB_COUNTER(0, 4, ifInOctets),
 	RTL8365MB_MAKE_MIB_COUNTER(4, 2, dot3StatsFCSErrors),
 	RTL8365MB_MAKE_MIB_COUNTER(6, 2, dot3StatsSymbolErrors),
@@ -271,56 +204,38 @@ static struct rtl8365mb_mib_counter rtl8365mb_mib_counters[] = {
 	RTL8365MB_MAKE_MIB_COUNTER(118, 2, outMldGeneralQuery),
 	RTL8365MB_MAKE_MIB_COUNTER(120, 2, outMldSpecificQuery),
 	RTL8365MB_MAKE_MIB_COUNTER(122, 2, inKnownMulticastPkts),
+	/* RTL8365MB_MAKE_MIB_COUNTER(0x420, 2, dot1dTpLearnEntryDiscard), // global */
 };
 
-static_assert(ARRAY_SIZE(rtl8365mb_mib_counters) == RTL8365MB_MIB_END);
-
-enum rtl8365mb_phy_interface_mode {
-	RTL8365MB_PHY_INTERFACE_MODE_INVAL = 0,
-	RTL8365MB_PHY_INTERFACE_MODE_INTERNAL = BIT(0),
-	RTL8365MB_PHY_INTERFACE_MODE_MII = BIT(1),
-	RTL8365MB_PHY_INTERFACE_MODE_TMII = BIT(2),
-	RTL8365MB_PHY_INTERFACE_MODE_RMII = BIT(3),
-	RTL8365MB_PHY_INTERFACE_MODE_RGMII = BIT(4),
-	RTL8365MB_PHY_INTERFACE_MODE_SGMII = BIT(5),
-	RTL8365MB_PHY_INTERFACE_MODE_HSGMII = BIT(6),
+static const struct rtl8365mb_family_info rtl8365mb_family_info_a = {
+	.family_id = RTL8365MB_FAMILY_A,
+	.name = "RTL8367",
+	.num_ports = 10,
 };
 
-/**
- * struct rtl8365mb_extint - external interface info
- * @port: the port with an external interface
- * @id: the external interface ID, which is either 0, 1, or 2
- * @supported_interfaces: a bitmask of supported PHY interface modes
- *
- * Represents a mapping: port -> { id, supported_interfaces }. To be embedded
- * in &struct rtl8365mb_chip_info for every port with an external interface.
- */
-struct rtl8365mb_extint {
-	int port;
-	int id;
-	unsigned int supported_interfaces;
+static const struct rtl8365mb_family_info rtl8365mb_family_info_b = {
+	.family_id = RTL8365MB_FAMILY_B,
+	.name = "RTL8367B",
+	.num_ports = 8,
 };
 
-/**
- * struct rtl8365mb_chip_info - static chip-specific info
- * @name: human-readable chip name
- * @chip_id: chip identifier
- * @chip_ver: chip silicon revision
- * @extints: available external interfaces
- * @jam_table: chip-specific initialization jam table
- * @jam_size: size of the chip's jam table
- *
- * These data are specific to a given chip in the family of switches supported
- * by this driver. When adding support for another chip in the family, a new
- * chip info should be added to the rtl8365mb_chip_infos array.
- */
-struct rtl8365mb_chip_info {
-	const char *name;
-	u32 chip_id;
-	u32 chip_ver;
-	const struct rtl8365mb_extint extints[RTL8365MB_MAX_NUM_EXTINTS];
-	const struct rtl8365mb_jam_tbl_entry *jam_table;
-	const size_t *jam_size;
+static const struct rtl8365mb_family_info rtl8365mb_family_info_c = {
+	.family_id = RTL8365MB_FAMILY_C,
+	.name = "RTL8367C",
+	.num_ports = 11,
+	.jam_table = rtl8365mb_init_jam_common,
+	.jam_size = &rtl8365mb_init_jam_common_size,
+	.table_query = rtl8365mb_table_query_c,
+	.mib_counters = rtl8365mb_mib_counters_c,
+	.mib_port_offset = 0x7c,
+	.l2_flush = rtl8365mb_l2_flush_c,
+};
+
+static const struct rtl8365mb_family_info rtl8365mb_family_info_d = {
+	.family_id = RTL8365MB_FAMILY_D,
+	.name = "RTL8367D",
+	.num_ports = 8,
+	.table_query = rtl8365mb_table_query_c,
 };
 
 /* Chip info for each supported switch in the family */
@@ -330,6 +245,7 @@ static const struct rtl8365mb_chip_info rtl8365mb_chip_infos[] = {
 		.name = "RTL8365MB-VC",
 		.chip_id = 0x6367,
 		.chip_ver = 0x0040,
+		.family = &rtl8365mb_family_info_c,
 		.extints = {
 			{ 6, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
 				PHY_INTF(RMII) | PHY_INTF(RGMII) },
@@ -341,6 +257,7 @@ static const struct rtl8365mb_chip_info rtl8365mb_chip_infos[] = {
 		.name = "RTL8367S",
 		.chip_id = 0x6367,
 		.chip_ver = 0x00A0,
+		.family = &rtl8365mb_family_info_c,
 		.extints = {
 			{ 6, 1, PHY_INTF(SGMII) | PHY_INTF(HSGMII) },
 			{ 7, 2, PHY_INTF(MII) | PHY_INTF(TMII) |
@@ -367,6 +284,7 @@ static const struct rtl8365mb_chip_info rtl8365mb_chip_infos[] = {
 		.name = "RTL8367RB-VB",
 		.chip_id = 0x6367,
 		.chip_ver = 0x0020,
+		.family = &rtl8365mb_family_info_c,
 		.extints = {
 			{ 6, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
 				PHY_INTF(RMII) | PHY_INTF(RGMII) },
@@ -376,94 +294,6 @@ static const struct rtl8365mb_chip_info rtl8365mb_chip_infos[] = {
 		.jam_table = rtl8365mb_init_jam_8365mb_vc,
 		.jam_size = &rtl8365mb_init_jam_8365mb_vc_size,
 	},
-};
-
-enum rtl8365mb_stp_state {
-	RTL8365MB_STP_STATE_DISABLED = 0,
-	RTL8365MB_STP_STATE_BLOCKING = 1,
-	RTL8365MB_STP_STATE_LEARNING = 2,
-	RTL8365MB_STP_STATE_FORWARDING = 3,
-};
-
-enum rtl8365mb_cpu_insert {
-	RTL8365MB_CPU_INSERT_TO_ALL = 0,
-	RTL8365MB_CPU_INSERT_TO_TRAPPING = 1,
-	RTL8365MB_CPU_INSERT_TO_NONE = 2,
-};
-
-enum rtl8365mb_cpu_position {
-	RTL8365MB_CPU_POS_AFTER_SA = 0,
-	RTL8365MB_CPU_POS_BEFORE_CRC = 1,
-};
-
-enum rtl8365mb_cpu_format {
-	RTL8365MB_CPU_FORMAT_8BYTES = 0,
-	RTL8365MB_CPU_FORMAT_4BYTES = 1,
-};
-
-enum rtl8365mb_cpu_rxlen {
-	RTL8365MB_CPU_RXLEN_72BYTES = 0,
-	RTL8365MB_CPU_RXLEN_64BYTES = 1,
-};
-
-/**
- * struct rtl8365mb_cpu - CPU port configuration
- * @enable: enable/disable hardware insertion of CPU tag in switch->CPU frames
- * @mask: port mask of ports that parse should parse CPU tags
- * @trap_port: forward trapped frames to this port
- * @insert: CPU tag insertion mode in switch->CPU frames
- * @position: position of CPU tag in frame
- * @rx_length: minimum CPU RX length
- * @format: CPU tag format
- *
- * Represents the CPU tagging and CPU port configuration of the switch. These
- * settings are configurable at runtime.
- */
-struct rtl8365mb_cpu {
-	bool enable;
-	u32 mask;
-	u32 trap_port;
-	enum rtl8365mb_cpu_insert insert;
-	enum rtl8365mb_cpu_position position;
-	enum rtl8365mb_cpu_rxlen rx_length;
-	enum rtl8365mb_cpu_format format;
-};
-
-/**
- * struct rtl8365mb_port - private per-port data
- * @priv: pointer to parent realtek_priv data
- * @index: DSA port index, same as dsa_port::index
- * @stats: link statistics populated by rtl8365mb_stats_poll, ready for atomic
- *         access via rtl8365mb_get_stats64
- * @stats_lock: protect the stats structure during read/update
- * @mib_work: delayed work for polling MIB counters
- */
-struct rtl8365mb_port {
-	struct realtek_priv *priv;
-	unsigned int index;
-	struct rtnl_link_stats64 stats;
-	spinlock_t stats_lock;
-	struct delayed_work mib_work;
-};
-
-/**
- * struct rtl8365mb - driver private data
- * @priv: pointer to parent realtek_priv data
- * @irq: registered IRQ or zero
- * @chip_info: chip-specific info about the attached switch
- * @cpu: CPU tagging and CPU port configuration for this chip
- * @mib_lock: prevent concurrent reads of MIB counters
- * @ports: per-port data
- *
- * Private data for this driver.
- */
-struct rtl8365mb {
-	struct realtek_priv *priv;
-	int irq;
-	const struct rtl8365mb_chip_info *chip_info;
-	struct rtl8365mb_cpu cpu;
-	struct mutex mib_lock;
-	struct rtl8365mb_port ports[RTL8365MB_MAX_NUM_PORTS];
 };
 
 static int rtl8365mb_phy_poll_busy(struct realtek_priv *priv)
@@ -1657,13 +1487,17 @@ static int rtl8365mb_vlan_setup(struct dsa_switch *ds)
 static int rtl8365mb_port_set_learning(struct realtek_priv *priv, int port,
 				       bool enable)
 {
+	int limit;
+
 	/* Enable/disable learning by limiting the number of L2 addresses the
 	 * port can learn. Realtek documentation states that a limit of zero
 	 * disables learning. When enabling learning, set it to the chip's
 	 * maximum.
 	 */
+	limit = enable ? priv->variant->l2_table_size : 0;
+
 	return regmap_write(priv->map, RTL8365MB_LUT_PORT_LEARN_LIMIT_REG(port),
-			    enable ? RTL8365MB_LEARN_LIMIT_MAX : 0);
+			    limit);
 }
 
 static int rtl8365mb_port_set_ucast_flood(struct realtek_priv *priv, int port,
@@ -1750,9 +1584,13 @@ static int rtl8365mb_port_remove_isolation(struct realtek_priv *priv, int port,
 }
 
 static int rtl8365mb_mib_counter_read(struct realtek_priv *priv, int port,
-				      u32 offset, u32 length, u64 *mibvalue)
+				      const struct rtl8365mb_mib_counter *mib,
+				      u64 *mibvalue)
 {
+	struct rtl8365mb *mb = priv->chip_data;
+	u32 offset = mib->offset;
 	u64 tmpvalue = 0;
+	u32 addr;
 	u32 val;
 	int ret;
 	int i;
@@ -1761,8 +1599,8 @@ static int rtl8365mb_mib_counter_read(struct realtek_priv *priv, int port,
 	 * and then poll the control register before reading the value from some
 	 * counter registers.
 	 */
-	ret = regmap_write(priv->map, RTL8365MB_MIB_ADDRESS_REG,
-			   RTL8365MB_MIB_ADDRESS(port, offset));
+	addr = offset + mb->chip_info->family->mib_port_offset * port;
+	ret = regmap_write(priv->map, RTL8365MB_MIB_ADDRESS_REG, addr >> 2);
 	if (ret)
 		return ret;
 
@@ -1782,19 +1620,19 @@ static int rtl8365mb_mib_counter_read(struct realtek_priv *priv, int port,
 	 * two or lower two registers. In case the MIB counter is 4 words, we
 	 * read from all four registers.
 	 */
-	if (length == 4)
+	if (mib->length == 4)
 		offset = 3;
 	else
 		offset = (offset + 1) % 4;
 
 	/* Read the MIB counter 16 bits at a time */
-	for (i = 0; i < length; i++) {
+	for (i = 0; i < mib->length; i++) {
 		ret = regmap_read(priv->map,
 				  RTL8365MB_MIB_COUNTER_REG(offset - i), &val);
 		if (ret)
 			return ret;
 
-		tmpvalue = ((tmpvalue) << 16) | (val & 0xFFFF);
+		tmpvalue = (tmpvalue << 16) | (val & 0xFFFF);
 	}
 
 	/* Only commit the result if no error occurred */
@@ -1806,109 +1644,93 @@ static int rtl8365mb_mib_counter_read(struct realtek_priv *priv, int port,
 static void rtl8365mb_get_ethtool_stats(struct dsa_switch *ds, int port, u64 *data)
 {
 	struct realtek_priv *priv = ds->priv;
-	struct rtl8365mb *mb;
-	int ret;
+	struct rtl8365mb *mb = priv->chip_data;
+	struct rtl8365mb_port *p = &mb->ports[port];
 	int i;
 
-	mb = priv->chip_data;
+	if (!mb->chip_info->family->mib_counters)
+		return;
 
-	mutex_lock(&mb->mib_lock);
+	spin_lock(&p->stats_lock);
 	for (i = 0; i < RTL8365MB_MIB_END; i++) {
-		struct rtl8365mb_mib_counter *mib = &rtl8365mb_mib_counters[i];
-
-		ret = rtl8365mb_mib_counter_read(priv, port, mib->offset,
-						 mib->length, &data[i]);
-		if (ret) {
-			dev_err(priv->dev,
-				"failed to read port %d counters: %pe\n", port,
-				ERR_PTR(ret));
-			break;
-		}
+		if (mb->chip_info->family->mib_counters[i].length)
+			*data++ = p->stats_cache[i];
 	}
-	mutex_unlock(&mb->mib_lock);
+	spin_unlock(&p->stats_lock);
 }
 
-static void rtl8365mb_get_strings(struct dsa_switch *ds, int port, u32 stringset, u8 *data)
+static void rtl8365mb_get_strings(struct dsa_switch *ds, int port, u32 stringset,
+				  u8 *data)
 {
+	struct realtek_priv *priv = ds->priv;
+	struct rtl8365mb *mb = priv->chip_data;
 	int i;
 
 	if (stringset != ETH_SS_STATS)
 		return;
 
+	if (!mb->chip_info->family->mib_counters)
+		return;
+
 	for (i = 0; i < RTL8365MB_MIB_END; i++) {
-		struct rtl8365mb_mib_counter *mib = &rtl8365mb_mib_counters[i];
-		ethtool_puts(&data, mib->name);
+		const struct rtl8365mb_mib_counter *mib =
+			&mb->chip_info->family->mib_counters[i];
+
+		if (mib->length)
+			ethtool_puts(&data, mib->name);
 	}
 }
 
 static int rtl8365mb_get_sset_count(struct dsa_switch *ds, int port, int sset)
 {
+	struct realtek_priv *priv = ds->priv;
+	struct rtl8365mb *mb = priv->chip_data;
+	int count = 0;
+	int i;
+
 	if (sset != ETH_SS_STATS)
 		return -EOPNOTSUPP;
 
-	return RTL8365MB_MIB_END;
+	if (!mb->chip_info->family->mib_counters)
+		return -EOPNOTSUPP;
+
+	for (i = 0; i < RTL8365MB_MIB_END; i++) {
+		if (mb->chip_info->family->mib_counters[i].length)
+			count++;
+	}
+
+	return count;
 }
 
 static void rtl8365mb_get_phy_stats(struct dsa_switch *ds, int port,
 				    struct ethtool_eth_phy_stats *phy_stats)
 {
 	struct realtek_priv *priv = ds->priv;
-	struct rtl8365mb_mib_counter *mib;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
+	struct rtl8365mb_port *p = &mb->ports[port];
 
-	mb = priv->chip_data;
-	mib = &rtl8365mb_mib_counters[RTL8365MB_MIB_dot3StatsSymbolErrors];
+	if (!mb->chip_info->family->mib_counters)
+		return;
 
-	mutex_lock(&mb->mib_lock);
-	rtl8365mb_mib_counter_read(priv, port, mib->offset, mib->length,
-				   &phy_stats->SymbolErrorDuringCarrier);
-	mutex_unlock(&mb->mib_lock);
+	spin_lock(&p->stats_lock);
+	phy_stats->SymbolErrorDuringCarrier =
+		p->stats_cache[RTL8365MB_MIB_dot3StatsSymbolErrors];
+	spin_unlock(&p->stats_lock);
 }
 
 static void rtl8365mb_get_mac_stats(struct dsa_switch *ds, int port,
 				    struct ethtool_eth_mac_stats *mac_stats)
 {
-	u64 cnt[RTL8365MB_MIB_END] = {
-		[RTL8365MB_MIB_ifOutOctets] = 1,
-		[RTL8365MB_MIB_ifOutUcastPkts] = 1,
-		[RTL8365MB_MIB_ifOutMulticastPkts] = 1,
-		[RTL8365MB_MIB_ifOutBroadcastPkts] = 1,
-		[RTL8365MB_MIB_dot3OutPauseFrames] = 1,
-		[RTL8365MB_MIB_ifOutDiscards] = 1,
-		[RTL8365MB_MIB_ifInOctets] = 1,
-		[RTL8365MB_MIB_ifInUcastPkts] = 1,
-		[RTL8365MB_MIB_ifInMulticastPkts] = 1,
-		[RTL8365MB_MIB_ifInBroadcastPkts] = 1,
-		[RTL8365MB_MIB_dot3InPauseFrames] = 1,
-		[RTL8365MB_MIB_dot3StatsSingleCollisionFrames] = 1,
-		[RTL8365MB_MIB_dot3StatsMultipleCollisionFrames] = 1,
-		[RTL8365MB_MIB_dot3StatsFCSErrors] = 1,
-		[RTL8365MB_MIB_dot3StatsDeferredTransmissions] = 1,
-		[RTL8365MB_MIB_dot3StatsLateCollisions] = 1,
-		[RTL8365MB_MIB_dot3StatsExcessiveCollisions] = 1,
-
-	};
 	struct realtek_priv *priv = ds->priv;
-	struct rtl8365mb *mb;
-	int ret;
-	int i;
+	struct rtl8365mb *mb = priv->chip_data;
+	struct rtl8365mb_port *p = &mb->ports[port];
+	u64 *cache = p->stats_cache;
+	u64 v;
 
-	mb = priv->chip_data;
+	if (!mb->chip_info->family->mib_counters)
+		return;
 
-	mutex_lock(&mb->mib_lock);
-	for (i = 0; i < RTL8365MB_MIB_END; i++) {
-		struct rtl8365mb_mib_counter *mib = &rtl8365mb_mib_counters[i];
-
-		/* Only fetch required MIB counters (marked = 1 above) */
-		if (!cnt[i])
-			continue;
-
-		ret = rtl8365mb_mib_counter_read(priv, port, mib->offset,
-						 mib->length, &cnt[i]);
-		if (ret)
-			break;
-	}
-	mutex_unlock(&mb->mib_lock);
+	spin_lock(&p->stats_lock);
 
 	/* The RTL8365MB-VC exposes MIB objects, which we have to translate into
 	 * IEEE 802.3 Managed Objects. This is not always completely faithful,
@@ -1916,132 +1738,91 @@ static void rtl8365mb_get_mac_stats(struct dsa_switch *ds, int port,
 	 * subject.
 	 */
 
-	mac_stats->FramesTransmittedOK = cnt[RTL8365MB_MIB_ifOutUcastPkts] +
-					 cnt[RTL8365MB_MIB_ifOutMulticastPkts] +
-					 cnt[RTL8365MB_MIB_ifOutBroadcastPkts] +
-					 cnt[RTL8365MB_MIB_dot3OutPauseFrames] -
-					 cnt[RTL8365MB_MIB_ifOutDiscards];
+	v = cache[RTL8365MB_MIB_dot3OutPauseFrames];
+	mac_stats->FramesTransmittedOK =
+		cache[RTL8365MB_MIB_ifOutUcastPkts] +
+		cache[RTL8365MB_MIB_ifOutMulticastPkts] +
+		cache[RTL8365MB_MIB_ifOutBroadcastPkts] + v -
+		cache[RTL8365MB_MIB_ifOutDiscards];
+
 	mac_stats->SingleCollisionFrames =
-		cnt[RTL8365MB_MIB_dot3StatsSingleCollisionFrames];
+		cache[RTL8365MB_MIB_dot3StatsSingleCollisionFrames];
 	mac_stats->MultipleCollisionFrames =
-		cnt[RTL8365MB_MIB_dot3StatsMultipleCollisionFrames];
-	mac_stats->FramesReceivedOK = cnt[RTL8365MB_MIB_ifInUcastPkts] +
-				      cnt[RTL8365MB_MIB_ifInMulticastPkts] +
-				      cnt[RTL8365MB_MIB_ifInBroadcastPkts] +
-				      cnt[RTL8365MB_MIB_dot3InPauseFrames];
+		cache[RTL8365MB_MIB_dot3StatsMultipleCollisionFrames];
+
+	v = cache[RTL8365MB_MIB_dot3InPauseFrames];
+	mac_stats->FramesReceivedOK = cache[RTL8365MB_MIB_ifInUcastPkts] +
+				      cache[RTL8365MB_MIB_ifInMulticastPkts] +
+				      cache[RTL8365MB_MIB_ifInBroadcastPkts] +
+				      v;
+
 	mac_stats->FrameCheckSequenceErrors =
-		cnt[RTL8365MB_MIB_dot3StatsFCSErrors];
-	mac_stats->OctetsTransmittedOK = cnt[RTL8365MB_MIB_ifOutOctets] -
+		cache[RTL8365MB_MIB_dot3StatsFCSErrors];
+	mac_stats->OctetsTransmittedOK = cache[RTL8365MB_MIB_ifOutOctets] -
 					 18 * mac_stats->FramesTransmittedOK;
 	mac_stats->FramesWithDeferredXmissions =
-		cnt[RTL8365MB_MIB_dot3StatsDeferredTransmissions];
-	mac_stats->LateCollisions = cnt[RTL8365MB_MIB_dot3StatsLateCollisions];
+		cache[RTL8365MB_MIB_dot3StatsDeferredTransmissions];
+	mac_stats->LateCollisions = cache[RTL8365MB_MIB_dot3StatsLateCollisions];
 	mac_stats->FramesAbortedDueToXSColls =
-		cnt[RTL8365MB_MIB_dot3StatsExcessiveCollisions];
-	mac_stats->OctetsReceivedOK = cnt[RTL8365MB_MIB_ifInOctets] -
+		cache[RTL8365MB_MIB_dot3StatsExcessiveCollisions];
+	mac_stats->OctetsReceivedOK = cache[RTL8365MB_MIB_ifInOctets] -
 				      18 * mac_stats->FramesReceivedOK;
 	mac_stats->MulticastFramesXmittedOK =
-		cnt[RTL8365MB_MIB_ifOutMulticastPkts];
+		cache[RTL8365MB_MIB_ifOutMulticastPkts];
 	mac_stats->BroadcastFramesXmittedOK =
-		cnt[RTL8365MB_MIB_ifOutBroadcastPkts];
+		cache[RTL8365MB_MIB_ifOutBroadcastPkts];
 	mac_stats->MulticastFramesReceivedOK =
-		cnt[RTL8365MB_MIB_ifInMulticastPkts];
+		cache[RTL8365MB_MIB_ifInMulticastPkts];
 	mac_stats->BroadcastFramesReceivedOK =
-		cnt[RTL8365MB_MIB_ifInBroadcastPkts];
+		cache[RTL8365MB_MIB_ifInBroadcastPkts];
+
+	spin_unlock(&p->stats_lock);
 }
 
 static void rtl8365mb_get_ctrl_stats(struct dsa_switch *ds, int port,
 				     struct ethtool_eth_ctrl_stats *ctrl_stats)
 {
 	struct realtek_priv *priv = ds->priv;
-	struct rtl8365mb_mib_counter *mib;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
+	struct rtl8365mb_port *p = &mb->ports[port];
 
-	mb = priv->chip_data;
-	mib = &rtl8365mb_mib_counters[RTL8365MB_MIB_dot3ControlInUnknownOpcodes];
+	if (!mb->chip_info->family->mib_counters)
+		return;
 
-	mutex_lock(&mb->mib_lock);
-	rtl8365mb_mib_counter_read(priv, port, mib->offset, mib->length,
-				   &ctrl_stats->UnsupportedOpcodesReceived);
-	mutex_unlock(&mb->mib_lock);
+	spin_lock(&p->stats_lock);
+	ctrl_stats->UnsupportedOpcodesReceived = p->stats_cache[RTL8365MB_MIB_dot3ControlInUnknownOpcodes];
+	spin_unlock(&p->stats_lock);
 }
 
 static void rtl8365mb_stats_update(struct realtek_priv *priv, int port)
 {
-	u64 cnt[RTL8365MB_MIB_END] = {
-		[RTL8365MB_MIB_ifOutOctets] = 1,
-		[RTL8365MB_MIB_ifOutUcastPkts] = 1,
-		[RTL8365MB_MIB_ifOutMulticastPkts] = 1,
-		[RTL8365MB_MIB_ifOutBroadcastPkts] = 1,
-		[RTL8365MB_MIB_ifOutDiscards] = 1,
-		[RTL8365MB_MIB_ifInOctets] = 1,
-		[RTL8365MB_MIB_ifInUcastPkts] = 1,
-		[RTL8365MB_MIB_ifInMulticastPkts] = 1,
-		[RTL8365MB_MIB_ifInBroadcastPkts] = 1,
-		[RTL8365MB_MIB_etherStatsDropEvents] = 1,
-		[RTL8365MB_MIB_etherStatsCollisions] = 1,
-		[RTL8365MB_MIB_etherStatsFragments] = 1,
-		[RTL8365MB_MIB_etherStatsJabbers] = 1,
-		[RTL8365MB_MIB_dot3StatsFCSErrors] = 1,
-		[RTL8365MB_MIB_dot3StatsLateCollisions] = 1,
-	};
 	struct rtl8365mb *mb = priv->chip_data;
-	struct rtnl_link_stats64 *stats;
-	int ret;
+	struct rtl8365mb_port *p = &mb->ports[port];
+	u64 tmp_cache[RTL8365MB_MIB_END] = {0};
 	int i;
 
-	stats = &mb->ports[port].stats;
-
-	mutex_lock(&mb->mib_lock);
-	for (i = 0; i < RTL8365MB_MIB_END; i++) {
-		struct rtl8365mb_mib_counter *c = &rtl8365mb_mib_counters[i];
-
-		/* Only fetch required MIB counters (marked = 1 above) */
-		if (!cnt[i])
-			continue;
-
-		ret = rtl8365mb_mib_counter_read(priv, port, c->offset,
-						 c->length, &cnt[i]);
-		if (ret)
-			break;
-	}
-	mutex_unlock(&mb->mib_lock);
-
-	/* Don't update statistics if there was an error reading the counters */
-	if (ret)
+	if (!mb->chip_info->family->mib_counters)
 		return;
 
-	spin_lock(&mb->ports[port].stats_lock);
+	dev_dbg(priv->dev, "rtl8365mb_stats_update: port=%d starting update\n", port);
 
-	stats->rx_packets = cnt[RTL8365MB_MIB_ifInUcastPkts] +
-			    cnt[RTL8365MB_MIB_ifInMulticastPkts] +
-			    cnt[RTL8365MB_MIB_ifInBroadcastPkts];
+	mutex_lock(&mb->mib_lock);
 
-	stats->tx_packets = cnt[RTL8365MB_MIB_ifOutUcastPkts] +
-			    cnt[RTL8365MB_MIB_ifOutMulticastPkts] +
-			    cnt[RTL8365MB_MIB_ifOutBroadcastPkts];
+	for (i = 0; i < RTL8365MB_MIB_END; i++) {
+		const struct rtl8365mb_mib_counter *mib =
+			&mb->chip_info->family->mib_counters[i];
 
-	/* if{In,Out}Octets includes FCS - remove it */
-	stats->rx_bytes = cnt[RTL8365MB_MIB_ifInOctets] - 4 * stats->rx_packets;
-	stats->tx_bytes =
-		cnt[RTL8365MB_MIB_ifOutOctets] - 4 * stats->tx_packets;
+		if (mib->length)
+			rtl8365mb_mib_counter_read(priv, port, mib, &tmp_cache[i]);
+	}
 
-	stats->rx_dropped = cnt[RTL8365MB_MIB_etherStatsDropEvents];
-	stats->tx_dropped = cnt[RTL8365MB_MIB_ifOutDiscards];
+	spin_lock(&p->stats_lock);
+	memcpy(p->stats_cache, tmp_cache, sizeof(tmp_cache));
+	spin_unlock(&p->stats_lock);
 
-	stats->multicast = cnt[RTL8365MB_MIB_ifInMulticastPkts];
-	stats->collisions = cnt[RTL8365MB_MIB_etherStatsCollisions];
+	mutex_unlock(&mb->mib_lock);
 
-	stats->rx_length_errors = cnt[RTL8365MB_MIB_etherStatsFragments] +
-				  cnt[RTL8365MB_MIB_etherStatsJabbers];
-	stats->rx_crc_errors = cnt[RTL8365MB_MIB_dot3StatsFCSErrors];
-	stats->rx_errors = stats->rx_length_errors + stats->rx_crc_errors;
-
-	stats->tx_aborted_errors = cnt[RTL8365MB_MIB_ifOutDiscards];
-	stats->tx_window_errors = cnt[RTL8365MB_MIB_dot3StatsLateCollisions];
-	stats->tx_errors = stats->tx_aborted_errors + stats->tx_window_errors;
-
-	spin_unlock(&mb->ports[port].stats_lock);
+	dev_dbg(priv->dev, "rtl8365mb_stats_update: port=%d update complete\n", port);
 }
 
 static void rtl8365mb_stats_poll(struct work_struct *work)
@@ -2060,14 +1841,42 @@ static void rtl8365mb_get_stats64(struct dsa_switch *ds, int port,
 				  struct rtnl_link_stats64 *s)
 {
 	struct realtek_priv *priv = ds->priv;
-	struct rtl8365mb_port *p;
-	struct rtl8365mb *mb;
+	struct rtl8365mb *mb = priv->chip_data;
+	struct rtl8365mb_port *p = &mb->ports[port];
+	u64 *cache = p->stats_cache;
 
-	mb = priv->chip_data;
-	p = &mb->ports[port];
+	if (!mb->chip_info->family->mib_counters)
+		return;
 
 	spin_lock(&p->stats_lock);
-	memcpy(s, &p->stats, sizeof(*s));
+
+	s->rx_packets = cache[RTL8365MB_MIB_ifInUcastPkts] +
+			cache[RTL8365MB_MIB_ifInMulticastPkts] +
+			cache[RTL8365MB_MIB_ifInBroadcastPkts];
+
+	s->tx_packets = cache[RTL8365MB_MIB_ifOutUcastPkts] +
+			cache[RTL8365MB_MIB_ifOutMulticastPkts] +
+			cache[RTL8365MB_MIB_ifOutBroadcastPkts];
+
+	/* if{In,Out}Octets includes FCS - remove it */
+	s->rx_bytes = cache[RTL8365MB_MIB_ifInOctets] - 4 * s->rx_packets;
+	s->tx_bytes = cache[RTL8365MB_MIB_ifOutOctets] - 4 * s->tx_packets;
+
+	s->rx_dropped = cache[RTL8365MB_MIB_etherStatsDropEvents];
+	s->tx_dropped = cache[RTL8365MB_MIB_ifOutDiscards];
+
+	s->multicast = cache[RTL8365MB_MIB_ifInMulticastPkts];
+	s->collisions = cache[RTL8365MB_MIB_etherStatsCollisions];
+
+	s->rx_length_errors = cache[RTL8365MB_MIB_etherStatsFragments] +
+			      cache[RTL8365MB_MIB_etherStatsJabbers];
+	s->rx_crc_errors = cache[RTL8365MB_MIB_dot3StatsFCSErrors];
+	s->rx_errors = s->rx_length_errors + s->rx_crc_errors;
+
+	s->tx_aborted_errors = cache[RTL8365MB_MIB_ifOutDiscards];
+	s->tx_window_errors = cache[RTL8365MB_MIB_dot3StatsLateCollisions];
+	s->tx_errors = s->tx_aborted_errors + s->tx_window_errors;
+
 	spin_unlock(&p->stats_lock);
 }
 
@@ -2088,10 +1897,10 @@ static int rtl8365mb_stats_setup(struct realtek_priv *priv)
 	dsa_switch_for_each_available_port(dp, ds) {
 		struct rtl8365mb_port *p = &mb->ports[dp->index];
 
-		/* Per-port spinlock to protect the stats64 data */
+		/* Per-port spinlock to protect the stats_cache data */
 		spin_lock_init(&p->stats_lock);
 
-		/* This work polls the MIB counters and keeps the stats64 data
+		/* This work polls the MIB counters and keeps the stats_cache data
 		 * up-to-date.
 		 */
 		INIT_DELAYED_WORK(&p->mib_work, rtl8365mb_stats_poll);
@@ -2453,7 +2262,17 @@ static int rtl8365mb_switch_init(struct realtek_priv *priv)
 
 	ci = mb->chip_info;
 
-	/* Do any chip-specific init jam before getting to the common stuff */
+	/* Family init jam */
+	if (ci->family->jam_table) {
+		for (i = 0; i < *ci->family->jam_size; i++) {
+			ret = regmap_write(priv->map, ci->family->jam_table[i].reg,
+					   ci->family->jam_table[i].val);
+			if (ret)
+				return ret;
+		}
+	}
+
+	/* Chip init jam */
 	if (ci->jam_table) {
 		for (i = 0; i < *ci->jam_size; i++) {
 			ret = regmap_write(priv->map, ci->jam_table[i].reg,
@@ -2461,14 +2280,6 @@ static int rtl8365mb_switch_init(struct realtek_priv *priv)
 			if (ret)
 				return ret;
 		}
-	}
-
-	/* Common init jam */
-	for (i = 0; i < rtl8365mb_init_jam_common_size; i++) {
-		ret = regmap_write(priv->map, rtl8365mb_init_jam_common[i].reg,
-				   rtl8365mb_init_jam_common[i].val);
-		if (ret)
-			return ret;
 	}
 
 	return 0;
@@ -2482,7 +2293,7 @@ static int rtl8365mb_reset_chip(struct realtek_priv *priv)
 			      FIELD_PREP(RTL8365MB_CHIP_RESET_HW_MASK, 1));
 
 	/* Realtek documentation says the chip needs 1 second to reset. Sleep
-	 * for 100 ms before accessing any registers to prevent ACK timeouts.
+	 * for a while before accessing any registers to prevent ACK timeouts.
 	 */
 	msleep(100);
 	return regmap_read_poll_timeout(priv->map, RTL8365MB_CHIP_RESET_REG, val,
@@ -2604,7 +2415,7 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 	 */
 	dsa_switch_for_each_cpu_port(dp, ds) {
 		/* Use the first CPU port as trap_port */
-		if (cpu->trap_port == RTL8365MB_MAX_NUM_PORTS)
+		if (cpu->trap_port == mb->chip_info->family->num_ports)
 			cpu->trap_port = dp->index;
 
 		/* Forward to all user ports */
@@ -2730,11 +2541,12 @@ static int rtl8365mb_detect(struct realtek_priv *priv)
 		return -ENODEV;
 	}
 
-	dev_info(priv->dev, "found an %s switch\n", mb->chip_info->name);
+	dev_info(priv->dev, "found an %s switch (%s family)\n",
+		 mb->chip_info->name, mb->chip_info->family->name);
 
-	priv->num_ports = RTL8365MB_MAX_NUM_PORTS;
+	priv->num_ports = mb->chip_info->family->num_ports;
 	mb->priv = priv;
-	mb->cpu.trap_port = RTL8365MB_MAX_NUM_PORTS;
+	mb->cpu.trap_port = mb->chip_info->family->num_ports;
 	mb->cpu.insert = RTL8365MB_CPU_INSERT_TO_ALL;
 	mb->cpu.position = RTL8365MB_CPU_POS_AFTER_SA;
 	mb->cpu.rx_length = RTL8365MB_CPU_RXLEN_64BYTES;
@@ -2806,6 +2618,7 @@ const struct realtek_variant rtl8365mb_variant = {
 	.ops = &rtl8365mb_ops,
 	.phylink_mac_ops = &rtl8365mb_phylink_mac_ops,
 	.clk_delay = 10,
+	.reset_delay_ms = 100,
 	.cmd_read = 0xb9,
 	.cmd_write = 0xb8,
 	.l2_table_size = RTL8365MB_L2_TABLE_SIZE,

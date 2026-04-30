@@ -21,6 +21,7 @@ int rtl8365mb_l2_del_uc(struct realtek_priv *priv, int port,
 			const unsigned char addr[static ETH_ALEN],
 			u16 efid, u16 vid);
 int rtl8365mb_l2_flush(struct realtek_priv *priv, int port, u16 vid);
+int rtl8365mb_l2_flush_c(struct realtek_priv *priv, int port, u16 vid);
 
 int rtl8365mb_l2_add_mc(struct realtek_priv *priv, int port,
 			const unsigned char mac_addr[static ETH_ALEN],

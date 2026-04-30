@@ -166,6 +166,7 @@ struct realtek_variant {
 	u8 cmd_read;
 	u8 cmd_write;
 	u16 l2_table_size;
+	uint reset_delay_ms;
 	size_t chip_data_sz;
 };
 
