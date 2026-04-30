@@ -46,6 +46,7 @@
  *
  */
 
+#include "rtl8365mb_reg.h"
 #include "rtl8365mb_vlan.h"
 #include "rtl8365mb_table.h"
 #include <linux/if_bridge.h>
@@ -112,16 +113,6 @@
 		(((_p) & 1) << 3)
 #define   RTL8365MB_VLAN_PVID_CTRL_PORT_MCIDX_MASK(_p) \
 		(0x1F << RTL8365MB_VLAN_PVID_CTRL_PORT_MCIDX_OFFSET(_p))
-
-/* Frame type filtering registers */
-#define RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_BASE	0x07aa
-#define RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_REG(port) \
-		(RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_BASE + ((port) >> 3))
-/* required as FIELD_PREP cannot use non-constant masks */
-#define RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_MASK(port) \
-		(0x3 << RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_OFFSET(port))
-#define RTL8365MB_VLAN_ACCEPT_FRAME_TYPE_OFFSET(port) \
-		(((port) & 0x7) << 1)
 
 /*
  * struct rtl8365mb_vlan4k - VLAN4k table entry
