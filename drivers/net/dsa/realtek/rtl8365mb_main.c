@@ -238,6 +238,7 @@ static const struct rtl8365mb_family_info rtl8365mb_family_info_d = {
 	.name = "RTL8367D",
 	.num_ports = 8,
 	.table_query = rtl8365mb_table_query_c,
+	.l2_flush = rtl8365mb_l2_flush_c,
 };
 
 /* Chip info for each supported switch in the family */
@@ -295,6 +296,17 @@ static const struct rtl8365mb_chip_info rtl8365mb_chip_infos[] = {
 		},
 		.jam_table = rtl8365mb_init_jam_8365mb_vc,
 		.jam_size = &rtl8365mb_init_jam_8365mb_vc_size,
+	},
+	{
+		.name = "RTL8367S-VB",
+		.chip_id = 0x6642,
+		.chip_ver = 0x0010,
+		.family = &rtl8365mb_family_info_d,
+		.extints = {
+			{ 6, 0, PHY_INTF(SGMII) | PHY_INTF(HSGMII) },
+			{ 7, 1, PHY_INTF(MII) | PHY_INTF(TMII) |
+				PHY_INTF(RMII) | PHY_INTF(RGMII) },
+		},
 	},
 };
 
@@ -2208,6 +2220,9 @@ static int rtl8365mb_cpu_config(struct realtek_priv *priv)
 		break;
 	case RTL8365MB_FAMILY_C:
 		port_mask = RTL8365MB_C_CPU_PORT_MASK;
+		break;
+	case RTL8365MB_FAMILY_D:
+		port_mask = RTL8365MB_D_CPU_PORT_MASK;
 		break;
 	default:
 		return -EINVAL;
