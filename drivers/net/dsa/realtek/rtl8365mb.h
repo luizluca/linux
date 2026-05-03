@@ -13,6 +13,7 @@
 
 #define RTL8365MB_MAX_NUM_PORTS		11
 #define RTL8365MB_MAX_NUM_EXTINTS	3
+#define RTL8365MB_MAX_NUM_LED_GROUPS	3
 
 enum rtl8365mb_phy_interface_mode {
 	RTL8365MB_PHY_INTERFACE_MODE_INVAL = 0,
@@ -175,12 +176,20 @@ struct rtl8365mb_cpu {
 	enum rtl8365mb_cpu_format format;
 };
 
+struct rtl8365mb_led {
+	struct led_classdev cdev;
+	struct realtek_priv *priv;
+	u8 port_num;
+	u8 led_group;
+};
+
 struct rtl8365mb_port {
 	struct realtek_priv *priv;
 	unsigned int index;
 	spinlock_t stats_lock;
 	struct delayed_work mib_work;
 	u64 stats_cache[RTL8365MB_MIB_END];
+	struct rtl8365mb_led leds[RTL8365MB_MAX_NUM_LED_GROUPS];
 };
 
 struct rtl8365mb {
@@ -194,5 +203,38 @@ struct rtl8365mb {
 	atomic_t vlan4k_ready_upto;
 	wait_queue_head_t vlan4k_wait;
 };
+
+enum rtl8365mb_ledgroup_mode {
+	RTL8365MB_LEDGROUP_OFF = 0,
+	RTL8365MB_LEDGROUP_DUP_COL = 1,
+	RTL8365MB_LEDGROUP_LINK_ACT = 2,
+	RTL8365MB_LEDGROUP_SPD1000 = 3,
+	RTL8365MB_LEDGROUP_SPD100 = 4,
+	RTL8365MB_LEDGROUP_SPD10 = 5,
+	RTL8365MB_LEDGROUP_SPD1000_ACT = 6,
+	RTL8365MB_LEDGROUP_SPD100_ACT = 7,
+	RTL8365MB_LEDGROUP_SPD10_ACT = 8,
+	RTL8365MB_LEDGROUP_SPD100_10_ACT = 9,
+	RTL8365MB_LEDGROUP_FIBER = 10,
+	RTL8365MB_LEDGROUP_FAULT = 11,
+	RTL8365MB_LEDGROUP_LINK_RX = 12,
+	RTL8365MB_LEDGROUP_LINK_TX = 13,
+	RTL8365MB_LEDGROUP_MASTER = 14,
+	RTL8365MB_LEDGROUP_FORCE = 15,
+	__RTL8365MB_LEDGROUP_MODE_MAX
+};
+
+#if IS_ENABLED(CONFIG_NET_DSA_REALTEK_RTL8365MB_LEDS)
+int rtl8365mb_led_setup(struct realtek_priv *priv);
+void rtl8365mb_led_teardown(struct realtek_priv *priv);
+#else
+static inline int rtl8365mb_led_setup(struct realtek_priv *priv)
+{
+	return 0;
+}
+static inline void rtl8365mb_led_teardown(struct realtek_priv *priv)
+{
+}
+#endif
 
 #endif /* _REALTEK_RTL8365MB_H */

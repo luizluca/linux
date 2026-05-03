@@ -2727,6 +2727,12 @@ static int rtl8365mb_setup(struct dsa_switch *ds)
 		goto out_teardown_irq;
 	}
 
+	ret = rtl8365mb_led_setup(priv);
+	if (ret) {
+		dev_err(priv->dev, "failed to set up LEDs: %pe\n", ERR_PTR(ret));
+		goto out_teardown_irq;
+	}
+
 	return 0;
 
 out_teardown_irq:
@@ -2742,6 +2748,7 @@ static void rtl8365mb_teardown(struct dsa_switch *ds)
 	struct rtl8365mb *mb = priv->chip_data;
 
 	cancel_work_sync(&mb->vlan_setup_work);
+	rtl8365mb_led_teardown(priv);
 	rtl8365mb_stats_teardown(priv);
 	rtl8365mb_irq_teardown(priv);
 }

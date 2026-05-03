@@ -20,4 +20,8 @@ rtl8365mb-objs := rtl8365mb_main.o \
 		  rtl8365mb_data.o \
 		  rtl8365mb_table.o \
 		  rtl8365mb_vlan.o \
-		  rtl8365mb_l2.o \
+		  rtl8365mb_l2.o
+
+ifdef CONFIG_NET_DSA_REALTEK_RTL8365MB_LEDS
+rtl8365mb-objs += rtl8365mb_leds.o
+endif
