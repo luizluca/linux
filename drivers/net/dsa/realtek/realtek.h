@@ -140,6 +140,11 @@ struct realtek_ops {
 					bool enable);
 	int	(*port_set_bcast_flood)(struct realtek_priv *priv, int port,
 					bool enable);
+	/* Set the VLAN awareness of a port. Actual forwarding still depends
+	 * on the global VLAN filtering state or the Transparent VLAN settings.
+	 */
+	int	(*port_set_vlan_aware)(struct realtek_priv *priv, int port,
+				       bool enable);
 	int	(*l2_add_uc)(struct realtek_priv *priv, int port,
 			     const unsigned char addr[ETH_ALEN],
 			     u16 efid, u16 vid);

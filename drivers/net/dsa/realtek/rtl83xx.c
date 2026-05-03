@@ -408,6 +408,17 @@ int rtl83xx_port_bridge_join(struct dsa_switch *ds, int port,
 			goto undo_learning;
 	}
 
+	/* If vlan filtering is global and already enabled for the switch,
+	 * apply it to the joining port. When not global, DSA core will
+	 * call port_vlan_filtering() for us.
+	 */
+	if (ds->vlan_filtering_is_global && ds->vlan_filtering &&
+	    priv->ops->port_set_vlan_aware) {
+		ret = priv->ops->port_set_vlan_aware(priv, port, true);
+		if (ret)
+			return ret;
+	}
+
 	return 0;
 
 undo_learning:
@@ -483,6 +494,12 @@ void rtl83xx_port_bridge_leave(struct dsa_switch *ds, int port,
 	/* Revert to the default EFID 0 for standalone mode */
 	if (priv->ops->port_set_efid)
 		priv->ops->port_set_efid(priv, port, 0);
+
+	/* When leaving a bridge, revert to non-filtering standalone mode
+	 * if vlan filtering is global.
+	 */
+	if (ds->vlan_filtering_is_global && priv->ops->port_set_vlan_aware)
+		priv->ops->port_set_vlan_aware(priv, port, false);
 }
 EXPORT_SYMBOL_NS_GPL(rtl83xx_port_bridge_leave, "REALTEK_DSA");
 

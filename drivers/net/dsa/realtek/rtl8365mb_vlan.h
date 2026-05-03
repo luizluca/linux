@@ -36,4 +36,5 @@ int rtl8365mb_vlan_4k_port_del(struct dsa_switch *ds, int port,
 int rtl8365mb_vlan_pvid_port_set(struct dsa_switch *ds, int port, u16 vid,
 				 struct netlink_ext_ack *extack);
 int rtl8365mb_vlan_pvid_port_clear(struct dsa_switch *ds, int port, u16 vid);
+void rtl8365mb_vlan_setup_worker_a(struct work_struct *work);
 #endif /* _REALTEK_RTL8365MB_VLAN_H */

@@ -26,6 +26,9 @@ extern const size_t rtl8365mb_init_jam_common_size;
 extern const struct rtl8365mb_jam_tbl_entry rtl8365mb_init_jam_8365mb_vc[];
 extern const size_t rtl8365mb_init_jam_8365mb_vc_size;
 
+extern const struct rtl8365mb_jam_tbl_entry rtl8365mb_init_jam_rtl8367r[];
+extern const size_t rtl8365mb_init_jam_rtl8367r_size;
+
 extern const struct rtl8365mb_sds_init calib_data_SGMII_opt0[];
 extern const size_t calib_data_SGMII_opt0_size;
 

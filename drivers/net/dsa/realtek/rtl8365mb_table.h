@@ -135,6 +135,12 @@ int rtl8365mb_table_query(struct realtek_priv *priv,
 			  enum rtl8365mb_table_l2_method method,
 			  u16 port, u16 *data, size_t size);
 
+int rtl8365mb_table_query_a(struct realtek_priv *priv,
+			    enum rtl8365mb_table table,
+			    enum rtl8365mb_table_op op, u16 *addr,
+			    enum rtl8365mb_table_l2_method method,
+			    u16 port, u16 *data, size_t size);
+
 int rtl8365mb_table_query_b(struct realtek_priv *priv,
 			    enum rtl8365mb_table table,
 			    enum rtl8365mb_table_op op, u16 *addr,

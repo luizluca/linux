@@ -11,12 +11,132 @@
 
 static int rtl8365mb_table_poll_busy(struct realtek_priv *priv)
 {
+	struct rtl8365mb *mb = priv->chip_data;
 	u32 val;
+	u32 reg, mask;
+
+	if (mb->chip_info->family->family_id == RTL8365MB_FAMILY_A) {
+		reg = RTL8365MB_TABLE_CTRL_REG;
+		mask = RTL8365MB_A_TABLE_CTRL_BUSY_MASK;
+	} else {
+		reg = RTL8365MB_TABLE_STATUS_REG;
+		mask = RTL8365MB_TABLE_STATUS_BUSY_FLAG_MASK;
+	}
 
 	return regmap_read_poll_timeout(priv->map_nolock,
-			RTL8365MB_TABLE_STATUS_REG, val,
-			!FIELD_GET(RTL8365MB_TABLE_STATUS_BUSY_FLAG_MASK, val),
+			reg, val,
+			!(val & mask),
 			10, 10000);
+}
+
+int rtl8365mb_table_query_a(struct realtek_priv *priv,
+			    enum rtl8365mb_table table,
+			    enum rtl8365mb_table_op op, u16 *addr,
+			    enum rtl8365mb_table_l2_method method,
+			    u16 port, u16 *data, size_t size)
+{
+	bool addr_as_input = true;
+	bool write_data = false;
+	int ret = 0;
+	u32 cmd;
+	u32 val;
+
+	if (!addr) {
+		dev_err(priv->dev, "%s: addr is NULL\n", __func__);
+		return -EINVAL;
+	}
+
+	if (!data) {
+		dev_err(priv->dev, "%s: data is NULL\n", __func__);
+		return -EINVAL;
+	}
+
+	if (size > 6) {
+		dev_err(priv->dev, "%s: size too big: %zu\n", __func__, size);
+		return -E2BIG;
+	}
+
+	if (size == 0) {
+		dev_err(priv->dev, "%s: size is 0\n", __func__);
+		return -EINVAL;
+	}
+
+	/* Prepare target table and operation (read or write) */
+	cmd = 0;
+	cmd |= FIELD_PREP(RTL8365MB_A_TABLE_CTRL_TABLE_MASK, table);
+
+	if (op == RTL8365MB_TABLE_OP_WRITE) {
+		cmd |= RTL8365MB_A_TABLE_CTRL_OP_MASK;
+		write_data = true;
+
+		if (table == RTL8365MB_TABLE_L2)
+			addr_as_input = false;
+	}
+
+	if (op == RTL8365MB_TABLE_OP_READ && table == RTL8365MB_TABLE_L2) {
+		if (method == RTL8365MB_TABLE_L2_METHOD_MAC) {
+			write_data = true;
+			addr_as_input = false;
+		} else {
+			cmd |= RTL8365MB_A_TABLE_CTRL_METHOD_MASK;
+		}
+	}
+
+	mutex_lock(&priv->map_lock);
+
+	/* Write entry data if writing to the table (or L2_METHOD_MAC) */
+	if (write_data) {
+		ret = regmap_bulk_write(priv->map_nolock,
+					RTL8365MB_A_TABLE_DATA_BASE,
+					data, size);
+		if (ret)
+			goto out;
+	}
+
+	/* Write address (if needed) */
+	if (addr_as_input) {
+		ret = regmap_write(priv->map_nolock,
+				   RTL8365MB_TABLE_ACCESS_ADDR_REG,
+				   *addr);
+		if (ret)
+			goto out;
+	}
+
+	/* Execute */
+	ret = regmap_write(priv->map_nolock, RTL8365MB_TABLE_CTRL_REG, cmd);
+	if (ret)
+		goto out;
+
+	/* Poll for completion */
+	ret = rtl8365mb_table_poll_busy(priv);
+	if (ret)
+		goto out;
+
+	/* For both reads and writes to the L2 table, check status */
+	if (table == RTL8365MB_TABLE_L2) {
+		ret = regmap_read(priv->map_nolock, RTL8365MB_TABLE_STATUS_REG,
+				  &val);
+		if (ret)
+			goto out;
+
+		if (!(val & RTL8365MB_A_TABLE_STATUS_HIT_MASK)) {
+			ret = -ENOENT;
+			goto out;
+		}
+
+		*addr = val & RTL8365MB_A_TABLE_STATUS_IDX_MASK;
+	}
+
+	/* Finally, get the table entry if we were reading */
+	if (op == RTL8365MB_TABLE_OP_READ) {
+		ret = regmap_bulk_read(priv->map_nolock,
+				       RTL8365MB_A_TABLE_DATA_BASE,
+				       data, size);
+	}
+
+out:
+	mutex_unlock(&priv->map_lock);
+	return ret;
 }
 
 int rtl8365mb_table_query_b(struct realtek_priv *priv,

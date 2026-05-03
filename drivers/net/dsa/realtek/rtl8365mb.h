@@ -67,6 +67,8 @@ enum rtl8365mb_mib_counter_index {
 	RTL8365MB_MIB_etherStatsPkts256to511Octets,
 	RTL8365MB_MIB_etherStatsPkts512to1023Octets,
 	RTL8365MB_MIB_etherStatsPkts1024to1518Octets,
+	RTL8365MB_MIB_etherStatsMulticastPkts,
+	RTL8365MB_MIB_etherStatsBroadcastPkts,
 	RTL8365MB_MIB_ifOutOctets,
 	RTL8365MB_MIB_dot3StatsSingleCollisionFrames,
 	RTL8365MB_MIB_dot3StatsMultipleCollisionFrames,
@@ -76,12 +78,14 @@ enum rtl8365mb_mib_counter_index {
 	RTL8365MB_MIB_dot3StatsExcessiveCollisions,
 	RTL8365MB_MIB_dot3OutPauseFrames,
 	RTL8365MB_MIB_ifOutDiscards,
+	RTL8365MB_MIB_dot1dBasePortDelayExceededDiscards,
 	RTL8365MB_MIB_dot1dTpPortInDiscards,
 	RTL8365MB_MIB_ifOutUcastPkts,
 	RTL8365MB_MIB_ifOutMulticastPkts,
 	RTL8365MB_MIB_ifOutBroadcastPkts,
 	RTL8365MB_MIB_outOampduPkts,
 	RTL8365MB_MIB_inOampduPkts,
+	RTL8365MB_MIB_pktgenPkts,
 	RTL8365MB_MIB_inIgmpJoinsSuccess,
 	RTL8365MB_MIB_inIgmpJoinsFail,
 	RTL8365MB_MIB_inMldJoinsSuccess,
@@ -97,6 +101,7 @@ enum rtl8365mb_mib_counter_index {
 	RTL8365MB_MIB_outMldGeneralQuery,
 	RTL8365MB_MIB_outMldSpecificQuery,
 	RTL8365MB_MIB_inKnownMulticastPkts,
+	RTL8365MB_MIB_dot1dTpLearnEntryDiscard,
 	RTL8365MB_MIB_END,
 };
 
@@ -185,6 +190,9 @@ struct rtl8365mb {
 	struct rtl8365mb_cpu cpu;
 	struct mutex mib_lock;
 	struct rtl8365mb_port ports[RTL8365MB_MAX_NUM_PORTS];
+	struct work_struct vlan_setup_work;
+	atomic_t vlan4k_ready_upto;
+	wait_queue_head_t vlan4k_wait;
 };
 
 #endif /* _REALTEK_RTL8365MB_H */

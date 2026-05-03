@@ -373,6 +373,27 @@ int rtl8365mb_l2_del_uc(struct realtek_priv *priv, int port,
 	return ret;
 }
 
+int rtl8365mb_l2_flush_a(struct realtek_priv *priv, int port, u16 vid)
+{
+	u32 val;
+	int ret;
+
+	if (vid)
+		return -EOPNOTSUPP;
+
+	mutex_lock(&priv->map_lock);
+
+	/* Family A only supports bulk port flush via 0x0A36.
+	 * Portmask covers 10 ports in bits 9:0.
+	 */
+	val = BIT(port);
+	ret = regmap_write(priv->map_nolock, RTL8365MB_L2_FLUSH_PORT_REG, val);
+
+	mutex_unlock(&priv->map_lock);
+
+	return ret;
+}
+
 int rtl8365mb_l2_flush_c(struct realtek_priv *priv, int port, u16 vid)
 {
 	int mode = vid ? RTL8365MB_L2_FLUSH_CTRL2_MODE_PORT_VID :
