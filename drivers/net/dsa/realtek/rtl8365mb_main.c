@@ -217,6 +217,8 @@ static const struct rtl8365mb_family_info rtl8365mb_family_info_b = {
 	.family_id = RTL8365MB_FAMILY_B,
 	.name = "RTL8367B",
 	.num_ports = 8,
+	.table_query = rtl8365mb_table_query_b,
+	.l2_flush = rtl8365mb_l2_flush_c,
 };
 
 static const struct rtl8365mb_family_info rtl8365mb_family_info_c = {
@@ -2197,25 +2199,65 @@ static int rtl8365mb_cpu_config(struct realtek_priv *priv)
 {
 	struct rtl8365mb *mb = priv->chip_data;
 	struct rtl8365mb_cpu *cpu = &mb->cpu;
-	u32 val;
+	u32 val, mask, port_mask;
 	int ret;
 
+	switch (mb->chip_info->family->family_id) {
+	case RTL8365MB_FAMILY_B:
+		port_mask = RTL8365MB_B_CPU_PORT_MASK;
+		break;
+	case RTL8365MB_FAMILY_C:
+		port_mask = RTL8365MB_C_CPU_PORT_MASK;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (cpu->trap_port >= mb->chip_info->family->num_ports) {
+		dev_err(priv->dev, "invalid trap port %d for family %s\n",
+			cpu->trap_port, mb->chip_info->family->name);
+		return -EINVAL;
+	}
+
+	/* while there is not field_fit() */
+	if (cpu->mask & ~port_mask) {
+		dev_err(priv->dev, "invalid cpu port mask 0x%08x\n", cpu->mask);
+		return -EINVAL;
+	}
+
 	ret = regmap_update_bits(priv->map, RTL8365MB_CPU_PORT_MASK_REG,
-				 RTL8365MB_CPU_PORT_MASK_MASK,
-				 FIELD_PREP(RTL8365MB_CPU_PORT_MASK_MASK,
-					    cpu->mask));
+				 port_mask, cpu->mask);
 	if (ret)
 		return ret;
 
-	val = FIELD_PREP(RTL8365MB_CPU_CTRL_EN_MASK, cpu->enable ? 1 : 0) |
-	      FIELD_PREP(RTL8365MB_CPU_CTRL_INSERTMODE_MASK, cpu->insert) |
-	      FIELD_PREP(RTL8365MB_CPU_CTRL_TAG_POSITION_MASK, cpu->position) |
-	      FIELD_PREP(RTL8365MB_CPU_CTRL_RXBYTECOUNT_MASK, cpu->rx_length) |
-	      FIELD_PREP(RTL8365MB_CPU_CTRL_TAG_FORMAT_MASK, cpu->format) |
-	      FIELD_PREP(RTL8365MB_CPU_CTRL_TRAP_PORT_MASK, cpu->trap_port & 0x7) |
-	      FIELD_PREP(RTL8365MB_CPU_CTRL_TRAP_PORT_EXT_MASK,
-			 cpu->trap_port >> 3 & 0x1);
-	ret = regmap_write(priv->map, RTL8365MB_CPU_CTRL_REG, val);
+	mask = RTL8365MB_CPU_CTRL_EN_MASK;
+	val = FIELD_PREP(RTL8365MB_CPU_CTRL_EN_MASK, cpu->enable ? 1 : 0);
+
+	{
+		mask |= RTL8365MB_CPU_CTRL_INSERTMODE_MASK |
+		        RTL8365MB_CPU_CTRL_TAG_POSITION_MASK |
+		        RTL8365MB_CPU_CTRL_RXBYTECOUNT_MASK |
+		        RTL8365MB_CPU_CTRL_TAG_FORMAT_MASK |
+		        RTL8365MB_CPU_CTRL_TRAP_PORT_MASK;
+		val |= FIELD_PREP(RTL8365MB_CPU_CTRL_INSERTMODE_MASK, cpu->insert) |
+		       FIELD_PREP(RTL8365MB_CPU_CTRL_TAG_POSITION_MASK, cpu->position) |
+		       FIELD_PREP(RTL8365MB_CPU_CTRL_RXBYTECOUNT_MASK, cpu->rx_length) |
+		       FIELD_PREP(RTL8365MB_CPU_CTRL_TAG_FORMAT_MASK, cpu->format) |
+		       FIELD_PREP(RTL8365MB_CPU_CTRL_TRAP_PORT_MASK, cpu->trap_port & 0x7);
+	}
+
+	/* Family C (RTL8367C) supports up to 11 ports. The trap port field
+	 * has an extra extension bit (bit 10) to accommodate this.
+	 * Family B does not define bit 10 and D use bit 10 for other purposes,
+	 * so we only set it for Family C.
+	 */
+	if (mb->chip_info->family->family_id == RTL8365MB_FAMILY_C) {
+		val |= FIELD_PREP(RTL8365MB_C_CPU_CTRL_TRAP_PORT_EXT_MASK,
+				  (cpu->trap_port >> 3) & 1);
+		mask |= RTL8365MB_C_CPU_CTRL_TRAP_PORT_EXT_MASK;
+	}
+
+	ret = regmap_update_bits(priv->map, RTL8365MB_CPU_CTRL_REG, mask, val);
 	if (ret)
 		return ret;
 
