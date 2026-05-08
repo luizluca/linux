@@ -15,6 +15,13 @@
 #define RTL8365MB_MAX_NUM_EXTINTS	3
 #define RTL8365MB_MAX_NUM_LED_GROUPS	3
 
+/* Valid for the whole family except RTL8370B, which has 4160 entries.
+ * RTL8370B is mentioned in vendor code but it might not even belong
+ * to the same RTL8367C family.
+ */
+#define RTL8365MB_LEARN_LIMIT_MAX	2112
+#define RTL8365MB_A_LEARN_LIMIT_MAX	8256
+
 enum rtl8365mb_phy_interface_mode {
 	RTL8365MB_PHY_INTERFACE_MODE_INVAL = 0,
 	RTL8365MB_PHY_INTERFACE_MODE_INTERNAL = BIT(0),

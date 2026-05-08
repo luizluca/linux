@@ -117,15 +117,9 @@
 #define RTL8365MB_NUM_PHYREGS		32
 #define RTL8365MB_PHYREGMAX		(RTL8365MB_NUM_PHYREGS - 1)
 
-/* Valid for the whole family except RTL8370B, which has 4160 entries.
- * RTL8370B is mentioned in vendor code but it might not even belong
- * to the same RTL8367C family.
- */
-#define RTL8365MB_LEARN_LIMIT_MAX	2112
-#define RTL8365MB_A_LEARN_LIMIT_MAX	8256
-
 /* The LUT table size matches the maximum learning limit */
 #define RTL8365MB_L2_TABLE_SIZE		RTL8365MB_LEARN_LIMIT_MAX
+#define RTL8365MB_A_L2_TABLE_SIZE	RTL8365MB_A_LEARN_LIMIT_MAX
 
 /* The DSA callback .get_stats64 runs in atomic context, so we are not allowed
  * to block. On the other hand, accessing MIB counters absolutely requires us to
@@ -2907,7 +2901,7 @@ const struct realtek_variant rtl8367r_variant = {
 	.reset_delay_ms = 1000,
 	.cmd_read = 0xb9,
 	.cmd_write = 0xb8,
-	.l2_table_size = RTL8365MB_A_LEARN_LIMIT_MAX,
+	.l2_table_size = RTL8365MB_A_L2_TABLE_SIZE,
 	.chip_data_sz = sizeof(struct rtl8365mb),
 };
 
