@@ -1672,6 +1672,9 @@ static int rtl8365mb_port_set_learning(struct realtek_priv *priv, int port,
 	 * disables learning. When enabling learning, set it to the chip's
 	 * maximum.
 	 */
+
+	dev_dbg(priv->dev, "port_set_learning port:%d enable:%d", port, enable);
+
 	limit = enable ? priv->variant->l2_table_size : 0;
 
 	return regmap_write(priv->map, RTL8365MB_LUT_PORT_LEARN_LIMIT_REG(port),
