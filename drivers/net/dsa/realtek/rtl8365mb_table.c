@@ -14,7 +14,7 @@
 /* Should be one of rtl8365mb_table_op enum members */
 #define   RTL8365MB_TABLE_CTRL_OP_MASK		GENMASK(3, 3)
 /* Should be one of rtl8365mb_table_l2_method enum members */
-#define   RTL8365MB_TABLE_CTRL_METHOD_MASK	GENMASK(7, 4)
+#define   RTL8365MB_TABLE_CTRL_METHOD_MASK	GENMASK(6, 4)
 #define   RTL8365MB_TABLE_CTRL_PORT_MASK	GENMASK(11, 8)
 
 /* Table access address register */
